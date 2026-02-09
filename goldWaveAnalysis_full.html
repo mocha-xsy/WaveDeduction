@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>黄金波浪分析 - 艾略特波浪点位图</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="wave-browser.js"></script>
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .chart-svg { width: 100%; height: 100%; display: block; border: 1px solid #ccc; }
+    .point:hover circle { opacity: 0.9; }
+    #tooltip { position: fixed; background: rgba(0,0,0,0.85); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; pointer-events: none; display: none; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div class="container mx-auto px-4 py-8 max-w-7xl">
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold text-gray-800 mb-2">黄金波浪分析</h1>
+      <p class="text-gray-600">艾略特波浪点位图 | 基于 wave_chart.html 效果</p>
+    </div>
+
+    <!-- 控制面板 -->
+    <div class="bg-white rounded-lg shadow p-4 mb-6">
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-600 mb-1">时间范围</label>
+          <select id="timeRange" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500">
+            <option value="7">7天</option>
+            <option value="30" selected>30天</option>
+            <option value="90">90天</option>
+            <option value="180">180天</option>
+            <option value="365">365天</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-600 mb-1">显示选项</label>
+          <div class="flex space-x-2 pt-2">
+            <label class="flex items-center"><input type="checkbox" id="showWaves" checked class="w-4 h-4 text-blue-600 rounded"> <span class="ml-1 text-sm">浪点连线</span></label>
+            <label class="flex items-center"><input type="checkbox" id="showLevels" checked class="w-4 h-4 text-blue-600 rounded"> <span class="ml-1 text-sm">回撤/反弹位</span></label>
+          </div>
+        </div>
+        <div class="md:col-span-3">
+          <label class="block text-sm font-medium text-gray-600 mb-1">选择K线数据文件</label>
+          <div class="flex items-center space-x-2">
+            <input type="file" id="jsonFileInput" accept=".json" class="border border-gray-300 rounded-md px-3 py-2 flex-1">
+            <button id="loadFileBtn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">加载</button>
+          </div>
+        </div>
+      </div>
+      <p id="fileStatus" class="text-sm text-gray-500 mt-2">请选择 gold_price_1h.json 或 gold_1year_data_real.json</p>
+    </div>
+
+    <!-- 图表区域（SVG，与 wave_chart.html 一致） -->
+    <div class="bg-white rounded-lg shadow p-4 mb-6">
+      <div id="chartHeader" class="mb-2 text-sm text-gray-600"></div>
+      <div id="chartWrap" class="relative" style="height: 460px; min-height: 400px;">
+        <div id="chartPlaceholder" class="absolute inset-0 flex items-center justify-center text-gray-400">
+          加载 K 线数据文件后显示波浪点位图
+        </div>
+        <div id="chartSvgContainer" class="absolute inset-0" style="display: none;"></div>
+      </div>
+    </div>
+    <div id="tooltip"></div>
+
+    <!-- 分析结果 -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+      <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="text-lg font-semibold text-gray-800 mb-3">波浪结构分析</h2>
+        <div id="waveAnalysis" class="space-y-2 text-sm text-gray-600"></div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="text-lg font-semibold text-gray-800 mb-3">关键点位</h2>
+        <div id="keyLevels" class="space-y-2 text-sm text-gray-600"></div>
+      </div>
+    </div>
+
+    <!-- 数据统计 -->
+    <div class="bg-white rounded-lg shadow p-4 mb-6">
+      <h2 class="text-lg font-semibold text-gray-800 mb-3">数据统计</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="text-center"><p class="text-gray-500 text-sm">当前价格</p><p id="currentPrice" class="text-xl font-bold">--</p></div>
+        <div class="text-center"><p class="text-gray-500 text-sm">数据点数量</p><p id="dataPoints" class="text-xl font-bold">--</p></div>
+        <div class="text-center"><p class="text-gray-500 text-sm">浪点数量</p><p id="wavePointsCount" class="text-xl font-bold">--</p></div>
+        <div class="text-center"><p class="text-gray-500 text-sm">时间范围</p><p id="updateTime" class="text-sm font-medium">--</p></div>
+      </div>
+    </div>
+
+    <div class="text-center text-gray-500 text-sm py-4">© 2026 黄金波浪分析工具 | 基于 wave_chart.html 效果</div>
+  </div>
+
+  <script>
+    let klineData = [];
+    let waveResult = null;
+    let analysisResult = null;
+    let selectedFile = null;
+    const WB = window.WaveBrowser;
+
+    function getKlineTime(d) {
+      if (d.timestamp != null) {
+        if (typeof d.timestamp === 'string') return new Date(d.timestamp).getTime();
+        return d.timestamp > 1e12 ? d.timestamp : d.timestamp * 1000;
+      }
+      const t = d.time;
+      return t != null && t > 1e12 ? t : (t || 0) * 1000;
+    }
+
+    function filterByTimeRange(data, days) {
+      if (!data || data.length === 0) return [];
+      const endMs = Date.now();
+      const startMs = endMs - days * 24 * 60 * 60 * 1000;
+      return data.filter(d => {
+        const t = getKlineTime(d);
+        return !isNaN(t) && t >= startMs && t <= endMs;
+      });
+    }
+
+    function generateWaveChartSVG(klineData, waveResult) {
+      if (!klineData || klineData.length === 0) return null;
+      const sorted = [...klineData].sort((a, b) => getKlineTime(a) - getKlineTime(b));
+      const prices = sorted.map(d => d.close || d.price);
+      const times = sorted.map(d => getKlineTime(d));
+      const minP = Math.min(...prices);
+      const maxP = Math.max(...prices);
+      const range = maxP - minP || 1;
+      const padding = { left: 70, right: 40, top: 30, bottom: 55 };
+      const chartWidth = 1200 - padding.left - padding.right;
+      const chartHeight = 400 - padding.top - padding.bottom;
+
+      const points = [];
+      const addPointFromKp = (kp, label) => {
+        const t = kp.time || kp.timestamp * 1000;
+        const p = kp.price ?? kp.close;
+        const idx = times.findIndex(tm => tm >= t);
+        const x = padding.left + (idx >= 0 ? (idx / Math.max(times.length - 1, 1)) * chartWidth : 0);
+        const y = padding.top + chartHeight - ((p - minP) / range) * chartHeight;
+        points.push({ x, y, p, label, time: new Date(t).toLocaleString('zh-CN'), t, isStart: label === '起点' });
+      };
+
+      if (!waveResult) {
+        const pathStr = sorted.map((d, i) => {
+          const p = d.close || d.price;
+          const x = padding.left + (i / Math.max(sorted.length - 1, 1)) * chartWidth;
+          const y = padding.top + chartHeight - ((p - minP) / range) * chartHeight;
+          return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+        }).join(' ');
+        const yAxisHtml = Array.from({ length: 6 }, (_, i) => {
+          const p = minP + (range * i) / 5;
+          const y = padding.top + chartHeight - ((p - minP) / range) * chartHeight;
+          return `<line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}" stroke="#e0e0e0" stroke-dasharray="2,2"/><text x="${padding.left - 8}" y="${y + 4}" font-size="11" fill="#666" text-anchor="end">${p.toFixed(0)}</text>`;
+        }).join('');
+        const xAxisHtml = Array.from({ length: 6 }, (_, i) => {
+          const idx = Math.round((i / 5) * (times.length - 1));
+          const t = times[Math.min(idx, times.length - 1)];
+          const x = padding.left + (idx / Math.max(times.length - 1, 1)) * chartWidth;
+          const timeStr = new Date(t).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+          return `<line x1="${x}" y1="${padding.top}" x2="${x}" y2="${padding.top + chartHeight}" stroke="#e0e0e0" stroke-dasharray="2,2"/><text x="${x}" y="${padding.top + chartHeight + 20}" font-size="11" fill="#666" text-anchor="middle">${timeStr}</text>`;
+        }).join('');
+        return { svg: buildSvgHtml(pathStr, '', '', '', '', yAxisHtml, xAxisHtml, []), chartData: sorted.map((d, i) => ({ time: new Date(times[i]).toLocaleString('zh-CN'), price: (d.close ?? d.price).toFixed(2), open: d.open != null ? d.open.toFixed(2) : null, high: d.high != null ? d.high.toFixed(2) : null, low: d.low != null ? d.low.toFixed(2) : null })), pts: [], PADDING: padding, CHART_WIDTH: chartWidth, CHART_HEIGHT: chartHeight };
+      }
+
+      const { impulse, corrective, continuation } = waveResult;
+      const lp = klineData.length < 300 ? 4 : 6;
+      const fullKeyPoints = WB.identifyKeyPoints(klineData, lp);
+      const w1StartTime = impulse?.wave1?.start?.time || impulse?.wave1?.start?.timestamp * 1000;
+      const tStart = times[0];
+      let labeledKeyPoints;
+      if (w1StartTime != null && tStart != null && w1StartTime > tStart && klineData.length >= 32) {
+        const beforeKline = klineData.filter(d => {
+          const t = getKlineTime(d);
+          return t >= tStart && t < w1StartTime;
+        });
+        const beforeKeyPoints = fullKeyPoints.filter(kp => {
+          const t = kp.time || kp.timestamp * 1000;
+          return t >= tStart && t < w1StartTime;
+        }).sort((a, b) => (a.time || a.timestamp * 1000) - (b.time || b.timestamp * 1000));
+        const mainKeyPoints = fullKeyPoints.filter(kp => {
+          const t = kp.time || kp.timestamp * 1000;
+          return t >= w1StartTime;
+        }).sort((a, b) => (a.time || a.timestamp * 1000) - (b.time || b.timestamp * 1000));
+        const beforeWaveResult = beforeKline.length >= 32 ? WB.identifyWaves12345AndABC(beforeKline, lp) : null;
+        const beforeLabels = beforeWaveResult ? WB.assignWaveLabelsToKeyPoints(beforeKeyPoints, beforeWaveResult) : beforeKeyPoints.map(kp => ({ point: kp, label: kp.type === 'high' ? '高' : '低' }));
+        const mainLabels = WB.assignWaveLabelsToKeyPoints(mainKeyPoints, waveResult);
+        labeledKeyPoints = [...beforeLabels, ...mainLabels].sort((a, b) => ((a.point.time || a.point.timestamp * 1000) - (b.point.time || b.point.timestamp * 1000)));
+      } else {
+        labeledKeyPoints = WB.assignWaveLabelsToKeyPoints(fullKeyPoints.sort((a, b) => (a.time || a.timestamp * 1000) - (b.time || b.timestamp * 1000)), waveResult);
+      }
+      labeledKeyPoints.forEach(({ point, label }) => addPointFromKp(point, label));
+
+      const hasContinuation = continuation && (continuation.wave1 || continuation.wave2 || continuation.wave3);
+      if (corrective?.waveC?.end && !hasContinuation) {
+        const cLow = corrective.waveC.endPrice ?? corrective.waveC.end?.price ?? corrective.waveC.end?.close;
+        const lastTime = times[times.length - 1] || Date.now();
+        const w5High = impulse?.wave5?.endPrice ?? impulse?.wave5?.end?.price;
+        const bHigh = corrective?.waveB?.endPrice ?? corrective?.waveB?.end?.price;
+        const bounceTarget = [w5High, bHigh].filter(Boolean).reduce((a, b) => Math.max(a, b), 0) || w5High || bHigh;
+        const bounceLevels = bounceTarget != null ? WB.calculateBounceLevels(cLow, bounceTarget) : null;
+        if (bounceLevels) {
+          const addPredicted = (price, label, xRatio) => {
+            const x = padding.left + chartWidth * (xRatio ?? 1);
+            const y = padding.top + chartHeight - ((price - minP) / range) * chartHeight;
+            points.push({ x, y, p: price, label, time: new Date(lastTime).toLocaleString('zh-CN'), isPredicted: true, t: lastTime });
+          };
+          addPredicted(bounceLevels[0.382], '预期浪1\' 0.382', 0.92);
+          addPredicted(bounceLevels[0.5], '预期浪1\' 0.5', 0.96);
+          addPredicted(bounceLevels[0.618], '预期浪3\' 0.618', 1);
+        }
+      }
+
+      points.sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
+
+      const pathStr = sorted.map((d, i) => {
+        const p = d.close || d.price;
+        const x = padding.left + (i / Math.max(sorted.length - 1, 1)) * chartWidth;
+        const y = padding.top + chartHeight - ((p - minP) / range) * chartHeight;
+        return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+      }).join(' ');
+
+      const firstPredictedIdx = points.findIndex(p => p.isPredicted);
+      const solidPts = firstPredictedIdx >= 0 ? points.slice(0, firstPredictedIdx) : points;
+      const predPts = firstPredictedIdx >= 0 ? points.slice(firstPredictedIdx - 1) : [];
+      const wavePathStr = solidPts.length > 0 ? solidPts.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ') : '';
+      const wavePathPredStr = predPts.length > 1 ? predPts.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ') : '';
+
+      const COMMON_RATIOS = [0.382, 0.5, 0.618];
+      const levelLines = [];
+      const w1 = impulse?.wave1;
+      const w5 = impulse?.wave5;
+      if (w1) {
+        const startP = w1.startPrice != null ? w1.startPrice : (w1.start?.price ?? w1.start?.close);
+        const endP = w1.endPrice != null ? w1.endPrice : (w1.end?.price ?? w1.end?.close);
+        const highP = Math.max(startP, endP);
+        const lowP = Math.min(startP, endP);
+        const ret = WB.calculateRetracementLevels(highP, lowP);
+        COMMON_RATIOS.forEach(ratio => {
+          const price = ret[ratio];
+          if (price != null && price >= minP - range * 0.1 && price <= maxP + range * 0.1) levelLines.push({ price, type: 'retracement', ratio });
+        });
+      }
+      if (w5 && w1) {
+        const lowP = w5.endPrice ?? w5.end?.price ?? w5.end?.close;
+        const highP = w1.startPrice ?? w1.start?.price ?? w1.start?.close;
+        const bounce = WB.calculateBounceLevels(lowP, highP);
+        COMMON_RATIOS.forEach(ratio => {
+          const price = bounce[ratio];
+          if (price != null && price >= minP - range * 0.1 && price <= maxP + range * 0.1) levelLines.push({ price, type: 'bounce', ratio });
+        });
+      }
+      const merged = [];
+      const threshold = range * 0.005;
+      levelLines.forEach(item => {
+        const near = merged.find(m => Math.abs(m.price - item.price) < threshold);
+        if (near) near.labels.push(`${item.type === 'retracement' ? '回撤' : '反弹'}${item.ratio}`);
+        else merged.push({ price: item.price, labels: [`${item.type === 'retracement' ? '回撤' : '反弹'}${item.ratio}`] });
+      });
+
+      let trendLineHtml = '';
+      const pt2 = points.find(p => p.label === '浪2');
+      const pt4 = points.find(p => p.label === '浪4');
+      const pt5 = points.find(p => p.label === '浪5');
+      const ptA = points.find(p => p.label === '浪a');
+      const chartTop = padding.top;
+      const chartBottom = padding.top + chartHeight;
+      const chartRight = padding.left + chartWidth;
+      const clampY = y => Math.max(chartTop - 20, Math.min(chartBottom + 20, y));
+      if (pt2 && pt4 && pt4.x > pt2.x && document.getElementById('showWaves')?.checked) {
+        const slope = (pt4.y - pt2.y) / (pt4.x - pt2.x);
+        trendLineHtml += `<line x1="${pt2.x}" y1="${pt2.y}" x2="${chartRight}" y2="${clampY(pt4.y + slope * (chartRight - pt4.x))}" stroke="#9c27b0" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.8"/>`;
+      }
+      if (pt5 && ptA && ptA.x > pt5.x && document.getElementById('showWaves')?.checked) {
+        const slope = (ptA.y - pt5.y) / (ptA.x - pt5.x);
+        trendLineHtml += `<line x1="${pt5.x}" y1="${pt5.y}" x2="${chartRight}" y2="${clampY(ptA.y + slope * (chartRight - ptA.x))}" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.8"/>`;
+      }
+
+      const yAxisHtml = Array.from({ length: 6 }, (_, i) => {
+        const p = minP + (range * i) / 5;
+        const y = padding.top + chartHeight - ((p - minP) / range) * chartHeight;
+        return `<line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}" stroke="#e0e0e0" stroke-dasharray="2,2"/><text x="${padding.left - 8}" y="${y + 4}" font-size="11" fill="#666" text-anchor="end">${p.toFixed(0)}</text>`;
+      }).join('');
+
+      const xAxisHtml = Array.from({ length: 6 }, (_, i) => {
+        const idx = Math.round((i / 5) * (times.length - 1));
+        const t = times[Math.min(idx, times.length - 1)];
+        const x = padding.left + (idx / Math.max(times.length - 1, 1)) * chartWidth;
+        const timeStr = new Date(t).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        return `<line x1="${x}" y1="${padding.top}" x2="${x}" y2="${padding.top + chartHeight}" stroke="#e0e0e0" stroke-dasharray="2,2"/><text x="${x}" y="${padding.top + chartHeight + 20}" font-size="11" fill="#666" text-anchor="middle">${timeStr}</text>`;
+      }).join('');
+
+      const showLevels = document.getElementById('showLevels')?.checked !== false;
+      const levelLinesHtml = showLevels ? merged.map(({ price, labels }) => {
+        const y = padding.top + chartHeight - ((price - minP) / range) * chartHeight;
+        return `<line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}" stroke="#ff9800" stroke-width="1" opacity="0.7"/><text x="${padding.left + chartWidth + 4}" y="${y + 4}" font-size="10" fill="#e65100">${labels.join('/')}</text>`;
+      }).join('\n') : '';
+
+      const showWaves = document.getElementById('showWaves')?.checked !== false;
+      const wavePathDisplay = showWaves ? wavePathStr : '';
+      const wavePathPredDisplay = showWaves ? wavePathPredStr : '';
+
+      const pointsHtml = points.map((pt, i) => {
+        const isPredicted = pt.isPredicted === true;
+        const fill = isPredicted ? '#ff9800' : 'red';
+        const r = pt.isStart ? 5 : 8;
+        return `<g class="point" data-index="${i}"><circle cx="${pt.x}" cy="${pt.y}" r="${r}" fill="${fill}" stroke="white" stroke-width="2" style="cursor:pointer"/><text x="${pt.x}" y="${pt.y - 14}" font-size="12" fill="${fill}" text-anchor="middle">${pt.label} ${pt.p.toFixed(0)}</text></g>`;
+      }).join('\n');
+
+      const chartData = sorted.map((d, i) => ({
+        time: new Date(times[i]).toLocaleString('zh-CN'),
+        price: (d.close ?? d.price).toFixed(2),
+        open: d.open != null ? d.open.toFixed(2) : null,
+        high: d.high != null ? d.high.toFixed(2) : null,
+        low: d.low != null ? d.low.toFixed(2) : null,
+        close: (d.close ?? d.price).toFixed(2)
+      }));
+
+      const pts = points.map(p => ({ time: p.time, price: p.p.toFixed(2), label: p.label }));
+
+      const svg = buildSvgHtml(pathStr, wavePathDisplay, wavePathPredDisplay, trendLineHtml, levelLinesHtml, yAxisHtml, xAxisHtml, pointsHtml);
+
+      return { svg, chartData, pts, PADDING: padding, CHART_WIDTH: chartWidth, CHART_HEIGHT: chartHeight };
+    }
+
+    function buildSvgHtml(pathStr, wavePathStr, wavePathPredStr, trendLineHtml, levelLinesHtml, yAxisHtml, xAxisHtml, pointsHtml) {
+      return `<svg viewBox="0 0 1200 460" preserveAspectRatio="xMidYMid meet" class="chart-svg">
+  <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa"/>
+  ${yAxisHtml}
+  ${xAxisHtml}
+  <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" stroke="#333" stroke-width="1"/>
+  <line x1="${padding.left}" y1="${padding.top + chartHeight}" x2="${padding.left + chartWidth}" y2="${padding.top + chartHeight}" stroke="#333" stroke-width="1"/>
+  ${levelLinesHtml}
+  <path d="${pathStr}" fill="none" stroke="#2196F3" stroke-width="2"/>
+  ${wavePathStr ? `<path d="${wavePathStr}" fill="none" stroke="#95a5a6" stroke-width="1.5"/>` : ''}
+  ${wavePathPredStr ? `<path d="${wavePathPredStr}" fill="none" stroke="#ff9800" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.9"/>` : ''}
+  ${trendLineHtml}
+  <line id="crosshair-v" x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" stroke="#999" stroke-width="1" stroke-dasharray="4,4" style="display:none; pointer-events:none"/>
+  <line id="crosshair-h" x1="${padding.left}" y1="${padding.top}" x2="${padding.left + chartWidth}" y2="${padding.top}" stroke="#999" stroke-width="1" stroke-dasharray="4,4" style="display:none; pointer-events:none"/>
+  <rect id="chart-overlay" x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}" fill="transparent" style="cursor:crosshair"/>
+  ${pointsHtml}
+</svg>`;
+    }
+
+    function attachChartEvents(container, result) {
+      if (!result) return;
+      const { chartData, pts, PADDING, CHART_WIDTH, CHART_HEIGHT } = result;
+      const tooltip = document.getElementById('tooltip');
+      const svg = container.querySelector('svg');
+      if (!svg) return;
+      const crosshairV = svg.querySelector('#crosshair-v');
+      const crosshairH = svg.querySelector('#crosshair-h');
+      const overlay = svg.querySelector('#chart-overlay');
+
+      function getMouseX(e) {
+        const rect = svg.getBoundingClientRect();
+        return (e.clientX - rect.left) * (1200 / rect.width);
+      }
+      function getMouseY(e) {
+        const rect = svg.getBoundingClientRect();
+        return (e.clientY - rect.top) * (460 / rect.height);
+      }
+      function showKlineTooltip(e) {
+        const x = getMouseX(e);
+        if (x < PADDING.left || x > PADDING.left + CHART_WIDTH) return;
+        const t = (x - PADDING.left) / CHART_WIDTH;
+        const idx = Math.round(t * (chartData.length - 1));
+        const d = chartData[Math.min(idx, chartData.length - 1)];
+        let html = '时间: ' + d.time + '<br/>收盘: ' + d.price;
+        if (d.open != null) html += '<br/>开盘: ' + d.open;
+        if (d.high != null) html += ' 最高: ' + d.high;
+        if (d.low != null) html += ' 最低: ' + d.low;
+        tooltip.innerHTML = html;
+        tooltip.style.display = 'block';
+        tooltip.style.left = (e.pageX + 12) + 'px';
+        tooltip.style.top = (e.pageY + 12) + 'px';
+        if (crosshairV) { crosshairV.setAttribute('x1', x); crosshairV.setAttribute('x2', x); crosshairV.style.display = 'block'; }
+        const y = getMouseY(e);
+        if (crosshairH) { crosshairH.setAttribute('y1', y); crosshairH.setAttribute('y2', y); crosshairH.setAttribute('x1', PADDING.left); crosshairH.setAttribute('x2', PADDING.left + CHART_WIDTH); crosshairH.style.display = 'block'; }
+      }
+      if (overlay) {
+        overlay.addEventListener('mouseenter', showKlineTooltip);
+        overlay.addEventListener('mousemove', showKlineTooltip);
+        overlay.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; if (crosshairV) crosshairV.style.display = 'none'; if (crosshairH) crosshairH.style.display = 'none'; });
+      }
+      container.querySelectorAll('.point').forEach((g, i) => {
+        if (pts[i]) {
+          g.addEventListener('mouseenter', function(e) {
+            tooltip.innerHTML = '<strong>' + pts[i].label + '</strong><br/>时间: ' + pts[i].time + '<br/>价格: ' + pts[i].price;
+            tooltip.style.display = 'block';
+            tooltip.style.left = (e.pageX + 12) + 'px';
+            tooltip.style.top = (e.pageY + 12) + 'px';
+            if (crosshairV) crosshairV.style.display = 'none';
+            if (crosshairH) crosshairH.style.display = 'none';
+          });
+          g.addEventListener('mouseleave', () => tooltip.style.display = 'none');
+          g.addEventListener('mousemove', function(e) { tooltip.style.left = (e.pageX + 12) + 'px'; tooltip.style.top = (e.pageY + 12) + 'px'; });
+        }
+      });
+    }
+
+    function updateChart() {
+      const placeholder = document.getElementById('chartPlaceholder');
+      const container = document.getElementById('chartSvgContainer');
+      const header = document.getElementById('chartHeader');
+
+      if (!klineData || klineData.length === 0) {
+        placeholder.style.display = 'flex';
+        container.style.display = 'none';
+        return;
+      }
+
+      const timeRange = parseInt(document.getElementById('timeRange').value);
+      const filtered = filterByTimeRange(klineData, timeRange);
+      if (filtered.length === 0) {
+        placeholder.textContent = '所选时间范围内无数据';
+        placeholder.style.display = 'flex';
+        container.style.display = 'none';
+        return;
+      }
+
+      const BARS_PER_DAY = 24;
+      const waveBars = Math.min(filtered.length, BARS_PER_DAY * 5);
+      const waveData = filtered.slice(-waveBars);
+      waveResult = WB.identifyWaves12345AndABC(waveData);
+
+      const result = generateWaveChartSVG(filtered, waveResult);
+      if (!result) return;
+
+      container.innerHTML = result.svg;
+      container.style.display = 'block';
+      placeholder.style.display = 'none';
+
+      const times = filtered.map(d => getKlineTime(d));
+      header.innerHTML = `<strong>黄金K线 - 艾略特波浪点位</strong><br/>数据范围: ${new Date(times[0]).toLocaleString('zh-CN')} ~ ${new Date(times[times.length - 1]).toLocaleString('zh-CN')} | 橙色: 回撤/反弹位 | 紫色虚线: 通道线 | 蓝色虚线: 预期走势`;
+
+      attachChartEvents(container, result);
+
+      if (waveResult) {
+        const imp = waveResult.impulse;
+        const corr = waveResult.corrective;
+        const w1Start = imp?.wave1?.startPrice ?? imp?.wave1?.start?.price;
+        const w1End = imp?.wave1?.endPrice ?? imp?.wave1?.end?.price;
+        const w5End = imp?.wave5?.endPrice ?? imp?.wave5?.end?.price;
+        const cEnd = corr?.waveC?.endPrice ?? corr?.waveC?.end?.price;
+        const bounceHigh = w5End ?? corr?.waveB?.endPrice ?? corr?.waveB?.end?.price ?? w1End;
+        analysisResult = {
+          wave1: w1Start != null && w1End != null ? { start: w1Start, end: w1End, range: w1End - w1Start } : null,
+          wave2: w1End != null ? { start: w1End, currentLow: cEnd ?? w5End ?? w1End } : null,
+          retracementLevels: w1Start != null && w1End != null ? WB.calculateRetracementLevels(Math.max(w1Start, w1End), Math.min(w1Start, w1End)) : {},
+          bounceLevels: cEnd != null && bounceHigh != null ? WB.calculateBounceLevels(cEnd, bounceHigh) : {}
+        };
+      }
+
+      updateAnalysis();
+      updateKeyLevels();
+      updateStats(result.pts?.length ?? 0);
+    }
+
+    function updateAnalysis() {
+      const el = document.getElementById('waveAnalysis');
+      if (!waveResult) {
+        el.innerHTML = '<p>无法识别波浪结构（需至少32条K线）</p>';
+        return;
+      }
+      const imp = waveResult.impulse;
+      const corr = waveResult.corrective;
+      let html = '';
+      if (imp?.wave1) {
+        const w1 = imp.wave1;
+        const startP = w1.startPrice ?? w1.start?.price;
+        const endP = w1.endPrice ?? w1.end?.price;
+        html += `<p><strong>第一浪:</strong> ${startP?.toFixed(2)} → ${endP?.toFixed(2)} (${(endP - startP).toFixed(2)})</p>`;
+      }
+      if (imp?.wave5) html += `<p><strong>第五浪终点:</strong> ${(imp.wave5.endPrice ?? imp.wave5.end?.price)?.toFixed(2)}</p>`;
+      if (corr?.waveC) html += `<p><strong>浪c低点:</strong> ${(corr.waveC.endPrice ?? corr.waveC.end?.price)?.toFixed(2)}</p>`;
+      el.innerHTML = html || '<p>识别完成</p>';
+    }
+
+    function updateKeyLevels() {
+      const el = document.getElementById('keyLevels');
+      if (!analysisResult) {
+        el.innerHTML = '<p>加载数据后显示</p>';
+        return;
+      }
+      let html = '';
+      if (analysisResult.retracementLevels && Object.keys(analysisResult.retracementLevels).length > 0) {
+        html += '<p class="font-medium text-gray-700">回撤位</p>';
+        Object.entries(analysisResult.retracementLevels).forEach(([r, p]) => { if (p != null) html += `<p>${r}: ${p.toFixed(2)}</p>`; });
+      }
+      if (analysisResult.bounceLevels && Object.keys(analysisResult.bounceLevels).length > 0) {
+        html += '<p class="font-medium text-gray-700 mt-2">反弹位</p>';
+        Object.entries(analysisResult.bounceLevels).forEach(([r, p]) => { if (p != null) html += `<p>${r}: ${p.toFixed(2)}</p>`; });
+      }
+      el.innerHTML = html || '<p>无</p>';
+    }
+
+    function updateStats(wavePointsCount) {
+      const price = klineData.length > 0 ? (klineData[klineData.length - 1].close ?? klineData[klineData.length - 1].price) : null;
+      document.getElementById('currentPrice').textContent = price != null ? price.toFixed(2) : '--';
+      document.getElementById('dataPoints').textContent = klineData.length;
+      document.getElementById('wavePointsCount').textContent = wavePointsCount ?? '--';
+      const times = klineData.map(d => getKlineTime(d));
+      document.getElementById('updateTime').textContent = times.length > 0 ? `${new Date(times[0]).toLocaleDateString()} ~ ${new Date(times[times.length - 1]).toLocaleDateString()}` : '--';
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      document.getElementById('jsonFileInput').addEventListener('change', function(e) {
+        selectedFile = e.target.files[0];
+        document.getElementById('fileStatus').textContent = selectedFile ? `已选择: ${selectedFile.name}` : '请选择文件';
+      });
+
+      document.getElementById('loadFileBtn').addEventListener('click', async function() {
+        if (!selectedFile) { alert('请先选择JSON文件'); return; }
+        try {
+          const text = await selectedFile.text();
+          const data = JSON.parse(text);
+          klineData = Array.isArray(data) ? data : (data.data || []);
+          klineData.sort((a, b) => getKlineTime(a) - getKlineTime(b));
+          document.getElementById('fileStatus').textContent = `已加载: ${selectedFile.name} (${klineData.length}条)`;
+          updateChart();
+        } catch (err) {
+          document.getElementById('fileStatus').textContent = '解析失败: ' + err.message;
+        }
+      });
+
+      document.getElementById('timeRange').addEventListener('change', updateChart);
+      document.getElementById('showWaves').addEventListener('change', updateChart);
+      document.getElementById('showLevels').addEventListener('change', updateChart);
+
+      const defaultFile = 'gold_price_1h.json';
+      fetch(defaultFile).then(r => r.ok ? r.json() : null).then(data => {
+        if (data) {
+          klineData = Array.isArray(data) ? data : (data.data || []);
+          klineData.sort((a, b) => getKlineTime(a) - getKlineTime(b));
+          document.getElementById('fileStatus').textContent = `已自动加载: ${defaultFile} (${klineData.length}条)`;
+          updateChart();
+        }
+      }).catch(() => {});
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "name": "gold-wave-analysis",
+  "version": "1.0.0",
+  "description": "黄金波浪理论+黄金分割实时分析工具",
+  "main": "goldWaveAnalysis.js",
+  "scripts": {
+    "start": "node goldWaveAnalysis.js",
+    "watch": "node goldWaveAnalysis.js --watch",
+    "test": "node goldWaveAnalysis.js",
+    "fetch:gold": "node fetch_year_data.js",
+    "wave": "node goldWaveAnalysis.js --wave"
+  },
+  "keywords": ["gold", "wave", "fibonacci", "technical-analysis", "trading"],
+  "author": "xiaosiyu",
+  "license": "MIT",
+  "engines": {"node": ">=12.0.0"},
+  "dependencies": {
+    "http-server": "^14.1.1",
+    "tough-cookie": "^6.0.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.40.0"
+  }
+}

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>黄金波浪点位图</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  #header { flex-shrink: 0; padding: 8px 20px; background: #f5f5f5; border-bottom: 1px solid #ddd; }
+  #header h2 { margin: 0 0 4px 0; font-size: 18px; }
+  #header p { margin: 0; font-size: 12px; color: #666; }
+  #chart-wrap { flex: 1; min-height: 0; padding: 0; }
+  #chart-wrap svg { width: 100%; height: 100%; display: block; }
+  #tooltip { position: fixed; background: rgba(0,0,0,0.85); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; pointer-events: none; display: none; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+  .point:hover circle { opacity: 0.9; }
+</style>
+</head>
+<body>
+<div id="header">
+<h2>黄金1小时K线 - 艾略特波浪点位</h2>
+<p>数据范围: 2026/2/4 08:00:00 ~ 2026/2/7 05:00:00 | 橙色: 回撤/反弹位 | 紫色虚线: 通道线 | 蓝色虚线: 预期走势</p>
+</div>
+<div id="tooltip"></div>
+<div id="chart-wrap">
+<svg viewBox="0 0 1200 460" preserveAspectRatio="xMidYMid meet" style="border:1px solid #ccc">
+  <rect x="70" y="30" width="1090" height="315" fill="#fafafa"/>
+  <line x1="70" y1="345" x2="1160" y2="345" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="62" y="349" font-size="11" fill="#666" text-anchor="end">4703</text>
+<line x1="70" y1="282.0000000000003" x2="1160" y2="282.0000000000003" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="62" y="286.0000000000003" font-size="11" fill="#666" text-anchor="end">4779</text>
+<line x1="70" y1="218.99999999999986" x2="1160" y2="218.99999999999986" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="62" y="222.99999999999986" font-size="11" fill="#666" text-anchor="end">4856</text>
+<line x1="70" y1="156.00000000000014" x2="1160" y2="156.00000000000014" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="62" y="160.00000000000014" font-size="11" fill="#666" text-anchor="end">4932</text>
+<line x1="70" y1="92.99999999999972" x2="1160" y2="92.99999999999972" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="62" y="96.99999999999972" font-size="11" fill="#666" text-anchor="end">5008</text>
+<line x1="70" y1="30" x2="1160" y2="30" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="62" y="34" font-size="11" fill="#666" text-anchor="end">5085</text>
+  <line x1="70" y1="30" x2="70" y2="345" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="70" y="365" font-size="11" fill="#666" text-anchor="middle">02/04 08:00</text>
+<line x1="281.4925373134329" y1="30" x2="281.4925373134329" y2="345" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="281.4925373134329" y="365" font-size="11" fill="#666" text-anchor="middle">02/04 21:00</text>
+<line x1="509.25373134328356" y1="30" x2="509.25373134328356" y2="345" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="509.25373134328356" y="365" font-size="11" fill="#666" text-anchor="middle">02/05 12:00</text>
+<line x1="720.7462686567163" y1="30" x2="720.7462686567163" y2="345" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="720.7462686567163" y="365" font-size="11" fill="#666" text-anchor="middle">02/06 01:00</text>
+<line x1="948.5074626865671" y1="30" x2="948.5074626865671" y2="345" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="948.5074626865671" y="365" font-size="11" fill="#666" text-anchor="middle">02/06 16:00</text>
+<line x1="1160" y1="30" x2="1160" y2="345" stroke="#e0e0e0" stroke-dasharray="2,2"/>
+<text x="1160" y="365" font-size="11" fill="#666" text-anchor="middle">02/07 05:00</text>
+  <line x1="70" y1="30" x2="70" y2="345" stroke="#333" stroke-width="1"/>
+  <line x1="70" y1="345" x2="1160" y2="345" stroke="#333" stroke-width="1"/>
+  <line x1="70" y1="144.74758450733904" x2="1160" y2="144.74758450733904" stroke="#ff9800" stroke-width="1" opacity="0.7"/>
+<text x="1164" y="148.74758450733904" font-size="10" fill="#e65100">回撤0.382</text>
+<line x1="70" y1="121.6519348565686" x2="1160" y2="121.6519348565686" stroke="#ff9800" stroke-width="1" opacity="0.7"/>
+<text x="1164" y="125.6519348565686" font-size="10" fill="#e65100">回撤0.5</text>
+<line x1="70" y1="98.55628520579822" x2="1160" y2="98.55628520579822" stroke="#ff9800" stroke-width="1" opacity="0.7"/>
+<text x="1164" y="102.55628520579822" font-size="10" fill="#e65100">回撤0.618</text>
+<line x1="70" y1="246.7695670784796" x2="1160" y2="246.7695670784796" stroke="#ff9800" stroke-width="1" opacity="0.7"/>
+<text x="1164" y="250.7695670784796" font-size="10" fill="#e65100">反弹0.382</text>
+<line x1="70" y1="204.1939919529605" x2="1160" y2="204.1939919529605" stroke="#ff9800" stroke-width="1" opacity="0.7"/>
+<text x="1164" y="208.1939919529605" font-size="10" fill="#e65100">反弹0.5</text>
+<line x1="70" y1="161.6184168274414" x2="1160" y2="161.6184168274414" stroke="#ff9800" stroke-width="1" opacity="0.7"/>
+<text x="1164" y="165.6184168274414" font-size="10" fill="#e65100">反弹0.618</text>
+  <path d="M 70 86.94398524070158 L 86.26865671641791 61.55674543662286 L 102.53731343283582 66.48904751128617 L 118.80597014925374 42.38009028947096 L 135.07462686567163 33.85176263918345 L 151.34328358208955 34.37129147696544 L 167.61194029850748 36.680577024129605 L 183.88059701492537 30 L 200.1492537313433 30.939984734405527 L 216.4179104477612 50.479504596938455 L 232.68656716417908 59.01628969342238 L 248.955223880597 60.61635796668418 L 265.22388059701495 66.06859161466264 L 281.4925373134329 55.58538568639557 L 297.76119402985074 111.5644165896355 L 314.02985074626866 164.91277899024612 L 330.2985074626866 178.8107795042134 L 346.5671641791045 183.73462413268027 L 362.8358208955224 159.8238127931819 L 379.1044776119403 147.87223311099774 L 395.37313432835816 150.64385905023454 L 411.64179104477614 129.36371621336545 L 427.910447761194 89.77320236118089 L 444.17910447761193 93.89721422078344 L 460.44776119402985 133.79300160710653 L 476.7164179104478 256.15251402862106 L 492.9850746268657 198.3337872098866 L 509.25373134328356 212.06666615525646 L 525.5223880597015 185.49175926387613 L 541.7910447761194 165.30866801934664 L 558.0597014925373 169.9687208735909 L 574.3283582089553 171.98964777900943 L 590.5970149253732 219.33322338014017 L 606.865671641791 201.7236121925306 L 623.134328358209 208.48715273649205 L 639.4029850746268 220.1825926195837 L 655.6716417910447 235.62307022557025 L 671.9402985074628 225.98117882608346 L 688.2089552238806 249.76835035690038 L 704.4776119402985 191.63629529336407 L 720.7462686567163 207.72839899201048 L 737.0149253731344 216.97440136239678 L 753.2835820895523 240.6294756383358 L 769.5522388059701 254.9153104707403 L 785.820895522388 280.92115205375944 L 802.089552238806 345 L 818.3582089552239 295.1904747293042 L 834.6268656716418 286.6782565003433 L 850.8955223880597 251.11268156660287 L 867.1641791044776 244.7454327872751 L 883.4328358208955 253.26570572689928 L 899.7014925373134 184.24609825979894 L 915.9701492537314 226.46768335014593 L 932.2388059701492 231.38347326794954 L 948.5074626865671 213.72472834529393 L 964.7761194029852 210.12830003413663 L 981.044776119403 200.1235439192688 L 997.3134328358209 192.43653079776155 L 1013.5820895522387 182.0685072319795 L 1029.8507462686566 158.56163963224495 L 1046.1194029850747 142.7752122032702 L 1062.3880597014925 146.56898092567803 L 1078.6567164179105 139.6076972349329 L 1094.9253731343283 132.4982068679833 L 1111.1940298507463 130.93921761910423 L 1127.4626865671642 134.91462006696918 L 1143.731343283582 138.568639559369 L 1160 127.78821480762667" fill="none" stroke="#2196F3" stroke-width="2"/>
+  <path d="M 200.1492537313433 23.789012607539973 L 330.2985074626866 219.51485710559726 L 427.910447761194 80.28797508409502 L 492.9850746268657 273.1270112804305 L 574.3283582089553 146.3877499357541 L 688.2089552238806 264.2930073604713 L 704.4776119402985 176.83938906937405 L 818.3582089552239 384.598971298381 L 915.9701492537314 179.80875815539454" fill="none" stroke="#95a5a6" stroke-width="1.5"/>
+  
+  <line x1="427.910447761194" y1="80.28797508409502" x2="1160" y2="365" stroke="#9c27b0" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.8"/><line x1="818.3582089552239" y1="384.598971298381" x2="1160" y2="10" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.8"/>
+  <line id="crosshair-v" x1="70" y1="30" x2="70" y2="345" stroke="#999" stroke-width="1" stroke-dasharray="4,4" style="display:none; pointer-events:none"/>
+  <line id="crosshair-h" x1="70" y1="30" x2="1160" y2="30" stroke="#999" stroke-width="1" stroke-dasharray="4,4" style="display:none; pointer-events:none"/>
+  <rect id="chart-overlay" x="70" y="30" width="1090" height="315" fill="transparent" style="cursor:crosshair"/>
+  <g class="point" data-index="0">
+  <circle cx="200.1492537313433" cy="23.789012607539973" r="5" fill="red" stroke="white" stroke-width="2" style="cursor:pointer"/>
+  <text x="200.1492537313433" y="9.789012607539973" font-size="12" fill="red" text-anchor="middle">起点 5092</text>
+</g>
+<g class="point" data-index="1">
+  <circle cx="330.2985074626866" cy="219.51485710559726" r="8" fill="red" stroke="white" stroke-width="2" style="cursor:pointer"/>
+  <text x="330.2985074626866" y="205.51485710559726" font-size="12" fill="red" text-anchor="middle">浪1 4855</text>
+</g>
+<g class="point" data-index="2">
+  <circle cx="427.910447761194" cy="80.28797508409502" r="8" fill="red" stroke="white" stroke-width="2" style="cursor:pointer"/>
+  <text x="427.910447761194" y="66.28797508409502" font-size="12" fill="red" text-anchor="middle">浪2 5024</text>
+</g>
+<g class="point" data-index="3">
+  <circle cx="492.9850746268657" cy="273.1270112804305" r="8" fill="red" stroke="white" stroke-width="2" style="cursor:pointer"/>
+  <text x="492.9850746268657" y="259.1270112804305" font-size="12" fill="red" text-anchor="middle">浪3 4790</text>
+</g>
+<g class="point" data-index="4">
+  <circle cx="574.3283582089553" cy="146.3877499357541" r="8" fill="red" stroke="white" stroke-width="2" style="cursor:pointer"/>
+  <text x="574.3283582089553" y="132.3877499357541" font-size="12" fill="red" text-anchor="middle">浪4 4944</text>
+</g>
+<g class="point" data-index="5">
+  <circle cx="688.2089552238806" cy="264.2930073604713" r="8" fill="red" stroke="white" stroke-width="2" style="cursor:pointer"/>
+  <text x="688.2089552238806" y="250.29300736047128" font-size="12" fill="red" text-anchor="middle">浪5·1 4801</text>
+</g>
+<g class="point" data-index="6">
+  <circle cx="704.4776119402985" cy="176.83938906937405" r="8" fill="red" stroke="white" stroke-width="2" style="cursor:pointer"/>
+  <text x="704.4776119402985" y="162.83938906937405" font-size="12" fill="red" text-anchor="middle">浪5·2 4907</text>
+</g>
+<g class="point" data-index="7">
+  <circle cx="818.3582089552239" cy="384.598971298381" r="8" fill="red" stroke="white" stroke-width="2" style="cursor:pointer"/>
+  <text x="818.3582089552239" y="370.598971298381" font-size="12" fill="red" text-anchor="middle">浪5 4655</text>
+</g>
+<g class="point" data-index="8">
+  <circle cx="915.9701492537314" cy="179.80875815539454" r="8" fill="red" stroke="white" stroke-width="2" style="cursor:pointer"/>
+  <text x="915.9701492537314" y="165.80875815539454" font-size="12" fill="red" text-anchor="middle">浪a 4903</text>
+</g>
+</svg>
+</div>
+<script>
+  const pts = [{"time":"2026/2/4 16:00:00","price":"5092.31","label":"起点"},{"time":"2026/2/5 00:00:00","price":"4855.01","label":"浪1"},{"time":"2026/2/5 07:00:00","price":"5023.81","label":"浪2"},{"time":"2026/2/5 11:00:00","price":"4790.01","label":"浪3"},{"time":"2026/2/5 16:00:00","price":"4943.67","label":"浪4"},{"time":"2026/2/5 23:00:00","price":"4800.72","label":"浪5·1"},{"time":"2026/2/6 00:00:00","price":"4906.75","label":"浪5·2"},{"time":"2026/2/6 08:00:00","price":"4654.86","label":"浪5"},{"time":"2026/2/6 14:00:00","price":"4903.15","label":"浪a"}];
+  const chartData = [{"time":"2026/2/4 08:00:00","price":"5015.74","open":"4947.54","high":"5016.38","low":"4947.08","close":"5015.74"},{"time":"2026/2/4 09:00:00","price":"5046.52","open":"5016.31","high":"5053.32","low":"4987.73","close":"5046.52"},{"time":"2026/2/4 10:00:00","price":"5040.54","open":"5047.09","high":"5065.31","low":"5035.94","close":"5040.54"},{"time":"2026/2/4 11:00:00","price":"5069.77","open":"5040.92","high":"5073.38","low":"5036.44","close":"5069.77"},{"time":"2026/2/4 12:00:00","price":"5080.11","open":"5069.97","high":"5080.44","low":"5056.38","close":"5080.11"},{"time":"2026/2/4 13:00:00","price":"5079.48","open":"5080.42","high":"5090.08","low":"5069.62","close":"5079.48"},{"time":"2026/2/4 14:00:00","price":"5076.68","open":"5079.67","high":"5082.35","low":"5051.24","close":"5076.68"},{"time":"2026/2/4 15:00:00","price":"5084.78","open":"5076.71","high":"5091.39","low":"5062.36","close":"5084.78"},{"time":"2026/2/4 16:00:00","price":"5083.64","open":"5084.93","high":"5092.31","low":"5069.11","close":"5083.64"},{"time":"2026/2/4 17:00:00","price":"5059.95","open":"5082.93","high":"5086.53","low":"5042.95","close":"5059.95"},{"time":"2026/2/4 18:00:00","price":"5049.60","open":"5060.00","high":"5064.24","low":"5041.64","close":"5049.60"},{"time":"2026/2/4 19:00:00","price":"5047.66","open":"5049.25","high":"5054.70","low":"5014.67","close":"5047.66"},{"time":"2026/2/4 20:00:00","price":"5041.05","open":"5048.61","high":"5063.43","low":"5037.90","close":"5041.05"},{"time":"2026/2/4 21:00:00","price":"5053.76","open":"5039.60","high":"5063.66","low":"5023.53","close":"5053.76"},{"time":"2026/2/4 22:00:00","price":"4985.89","open":"5053.80","high":"5058.61","low":"4968.21","close":"4985.89"},{"time":"2026/2/4 23:00:00","price":"4921.21","open":"4985.49","high":"5007.74","low":"4887.92","close":"4921.21"},{"time":"2026/2/5 00:00:00","price":"4904.36","open":"4920.22","high":"4940.45","low":"4855.01","close":"4904.36"},{"time":"2026/2/5 01:00:00","price":"4898.39","open":"4904.23","high":"4930.17","low":"4888.33","close":"4898.39"},{"time":"2026/2/5 02:00:00","price":"4927.38","open":"4898.13","high":"4935.13","low":"4873.23","close":"4927.38"},{"time":"2026/2/5 03:00:00","price":"4941.87","open":"4926.93","high":"4958.27","low":"4915.37","close":"4941.87"},{"time":"2026/2/5 04:00:00","price":"4938.51","open":"4941.43","high":"4951.01","low":"4915.66","close":"4938.51"},{"time":"2026/2/5 05:00:00","price":"4964.31","open":"4939.52","high":"4970.70","low":"4937.67","close":"4964.31"},{"time":"2026/2/5 07:00:00","price":"5012.31","open":"4980.34","high":"5023.81","low":"4969.28","close":"5012.31"},{"time":"2026/2/5 08:00:00","price":"5007.31","open":"5013.65","high":"5020.95","low":"4997.47","close":"5007.31"},{"time":"2026/2/5 09:00:00","price":"4958.94","open":"5006.97","high":"5012.31","low":"4936.65","close":"4958.94"},{"time":"2026/2/5 10:00:00","price":"4810.59","open":"4958.46","high":"4961.73","low":"4806.46","close":"4810.59"},{"time":"2026/2/5 11:00:00","price":"4880.69","open":"4809.42","high":"4887.58","low":"4790.01","close":"4880.69"},{"time":"2026/2/5 12:00:00","price":"4864.04","open":"4880.33","high":"4891.19","low":"4863.67","close":"4864.04"},{"time":"2026/2/5 13:00:00","price":"4896.26","open":"4863.46","high":"4906.36","low":"4826.80","close":"4896.26"},{"time":"2026/2/5 14:00:00","price":"4920.73","open":"4896.75","high":"4933.88","low":"4877.10","close":"4920.73"},{"time":"2026/2/5 15:00:00","price":"4915.08","open":"4920.51","high":"4940.27","low":"4896.28","close":"4915.08"},{"time":"2026/2/5 16:00:00","price":"4912.63","open":"4915.06","high":"4943.67","low":"4901.19","close":"4912.63"},{"time":"2026/2/5 17:00:00","price":"4855.23","open":"4914.21","high":"4914.21","low":"4849.06","close":"4855.23"},{"time":"2026/2/5 18:00:00","price":"4876.58","open":"4855.05","high":"4886.72","low":"4848.00","close":"4876.58"},{"time":"2026/2/5 19:00:00","price":"4868.38","open":"4877.06","high":"4894.72","low":"4864.56","close":"4868.38"},{"time":"2026/2/5 20:00:00","price":"4854.20","open":"4864.18","high":"4878.12","low":"4810.94","close":"4854.20"},{"time":"2026/2/5 21:00:00","price":"4835.48","open":"4846.07","high":"4867.90","low":"4802.64","close":"4835.48"},{"time":"2026/2/5 22:00:00","price":"4847.17","open":"4834.34","high":"4870.01","low":"4805.76","close":"4847.17"},{"time":"2026/2/5 23:00:00","price":"4818.33","open":"4844.36","high":"4863.63","low":"4800.72","close":"4818.33"},{"time":"2026/2/6 00:00:00","price":"4888.81","open":"4817.36","high":"4906.75","low":"4812.50","close":"4888.81"},{"time":"2026/2/6 01:00:00","price":"4869.30","open":"4889.97","high":"4890.42","low":"4859.40","close":"4869.30"},{"time":"2026/2/6 02:00:00","price":"4858.09","open":"4870.15","high":"4875.47","low":"4851.38","close":"4858.09"},{"time":"2026/2/6 03:00:00","price":"4829.41","open":"4858.19","high":"4865.38","low":"4824.22","close":"4829.41"},{"time":"2026/2/6 04:00:00","price":"4812.09","open":"4830.44","high":"4843.31","low":"4793.07","close":"4812.09"},{"time":"2026/2/6 05:00:00","price":"4780.56","open":"4812.03","high":"4826.18","low":"4759.27","close":"4780.56"},{"time":"2026/2/6 07:00:00","price":"4702.87","open":"4761.72","high":"4780.89","low":"4702.21","close":"4702.87"},{"time":"2026/2/6 08:00:00","price":"4763.26","open":"4702.76","high":"4764.61","low":"4654.86","close":"4763.26"},{"time":"2026/2/6 09:00:00","price":"4773.58","open":"4763.08","high":"4784.21","low":"4693.98","close":"4773.58"},{"time":"2026/2/6 10:00:00","price":"4816.70","open":"4774.13","high":"4846.10","low":"4761.66","close":"4816.70"},{"time":"2026/2/6 11:00:00","price":"4824.42","open":"4816.46","high":"4839.44","low":"4801.28","close":"4824.42"},{"time":"2026/2/6 12:00:00","price":"4814.09","open":"4824.40","high":"4831.94","low":"4807.26","close":"4814.09"},{"time":"2026/2/6 13:00:00","price":"4897.77","open":"4813.98","high":"4897.85","low":"4807.92","close":"4897.77"},{"time":"2026/2/6 14:00:00","price":"4846.58","open":"4897.84","high":"4903.15","low":"4825.73","close":"4846.58"},{"time":"2026/2/6 15:00:00","price":"4840.62","open":"4846.11","high":"4861.89","low":"4838.99","close":"4840.62"},{"time":"2026/2/6 16:00:00","price":"4862.03","open":"4841.48","high":"4882.16","low":"4829.67","close":"4862.03"},{"time":"2026/2/6 17:00:00","price":"4866.39","open":"4861.58","high":"4872.81","low":"4839.78","close":"4866.39"},{"time":"2026/2/6 18:00:00","price":"4878.52","open":"4866.52","high":"4880.05","low":"4851.55","close":"4878.52"},{"time":"2026/2/6 19:00:00","price":"4887.84","open":"4878.49","high":"4896.10","low":"4864.00","close":"4887.84"},{"time":"2026/2/6 20:00:00","price":"4900.41","open":"4885.05","high":"4902.81","low":"4871.02","close":"4900.41"},{"time":"2026/2/6 21:00:00","price":"4928.91","open":"4900.02","high":"4938.08","low":"4897.72","close":"4928.91"},{"time":"2026/2/6 22:00:00","price":"4948.05","open":"4929.89","high":"4949.46","low":"4894.42","close":"4948.05"},{"time":"2026/2/6 23:00:00","price":"4943.45","open":"4947.19","high":"4964.14","low":"4928.95","close":"4943.45"},{"time":"2026/2/7 00:00:00","price":"4951.89","open":"4943.54","high":"4953.73","low":"4922.32","close":"4951.89"},{"time":"2026/2/7 01:00:00","price":"4960.51","open":"4951.85","high":"4967.92","low":"4948.27","close":"4960.51"},{"time":"2026/2/7 02:00:00","price":"4962.40","open":"4960.58","high":"4971.09","low":"4944.69","close":"4962.40"},{"time":"2026/2/7 03:00:00","price":"4957.58","open":"4962.45","high":"4963.10","low":"4948.97","close":"4957.58"},{"time":"2026/2/7 04:00:00","price":"4953.15","open":"4957.13","high":"4959.23","low":"4936.83","close":"4953.15"},{"time":"2026/2/7 05:00:00","price":"4966.22","open":"4954.67","high":"4969.01","low":"4946.67","close":"4966.22"}];
+  const PADDING = {"left":70,"right":40,"top":30,"bottom":55};
+  const CHART_WIDTH = 1090;
+  const CHART_HEIGHT = 315;
+  const tooltip = document.getElementById('tooltip');
+  const crosshairV = document.getElementById('crosshair-v');
+  const crosshairH = document.getElementById('crosshair-h');
+  const overlay = document.getElementById('chart-overlay');
+  const svg = document.querySelector('svg');
+
+  function getMouseX(e) {
+    const rect = svg.getBoundingClientRect();
+    const scaleX = 1200 / rect.width;
+    return (e.clientX - rect.left) * scaleX;
+  }
+  function getMouseY(e) {
+    const rect = svg.getBoundingClientRect();
+    const scaleY = 460 / rect.height;
+    return (e.clientY - rect.top) * scaleY;
+  }
+
+  function showKlineTooltip(e) {
+    const x = getMouseX(e);
+    if (x < PADDING.left || x > PADDING.left + CHART_WIDTH) return;
+    const t = (x - PADDING.left) / CHART_WIDTH;
+    const idx = Math.round(t * (chartData.length - 1));
+    const d = chartData[Math.min(idx, chartData.length - 1)];
+    let html = '时间: ' + d.time + '<br/>收盘: ' + d.price;
+    if (d.open != null) html += '<br/>开盘: ' + d.open;
+    if (d.high != null) html += ' 最高: ' + d.high;
+    if (d.low != null) html += ' 最低: ' + d.low;
+    tooltip.innerHTML = html;
+    tooltip.style.display = 'block';
+    tooltip.style.left = (e.pageX + 12) + 'px';
+    tooltip.style.top = (e.pageY + 12) + 'px';
+    crosshairV.setAttribute('x1', x);
+    crosshairV.setAttribute('x2', x);
+    crosshairV.style.display = 'block';
+    const y = getMouseY(e);
+    crosshairH.setAttribute('y1', y);
+    crosshairH.setAttribute('y2', y);
+    crosshairH.setAttribute('x1', PADDING.left);
+    crosshairH.setAttribute('x2', PADDING.left + CHART_WIDTH);
+    crosshairH.style.display = 'block';
+  }
+
+  overlay.addEventListener('mouseenter', showKlineTooltip);
+  overlay.addEventListener('mousemove', function(e) {
+    showKlineTooltip(e);
+  });
+  overlay.addEventListener('mouseleave', function() {
+    tooltip.style.display = 'none';
+    crosshairV.style.display = 'none';
+    crosshairH.style.display = 'none';
+  });
+
+  document.querySelectorAll('.point').forEach((g, i) => {
+    g.addEventListener('mouseenter', function(e) {
+      tooltip.innerHTML = '<strong>' + pts[i].label + '</strong><br/>时间: ' + pts[i].time + '<br/>价格: ' + pts[i].price;
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.pageX + 12) + 'px';
+      tooltip.style.top = (e.pageY + 12) + 'px';
+      crosshairV.style.display = 'none';
+      crosshairH.style.display = 'none';
+    });
+    g.addEventListener('mouseleave', function() { tooltip.style.display = 'none'; });
+    g.addEventListener('mousemove', function(e) {
+      tooltip.style.left = (e.pageX + 12) + 'px';
+      tooltip.style.top = (e.pageY + 12) + 'px';
+    });
+  });
+</script>
+</body>
+</html>
