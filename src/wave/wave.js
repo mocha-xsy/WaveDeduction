@@ -936,14 +936,15 @@ function identifyWaves12345AndABC(klineData, lookbackPeriod) {
       }
     }
     // 浪5（下跌趋势）：浪4终点之后「最低」的低点
-    if (w4End) {
-      const after4Lows = pointsAfterHigh.filter(p => p.time > w4End.time && p.type === 'low' && p.price < w4End.price);
+    // 标准条件：必须低于浪3终点（创新低），这是下跌推动浪的基本规则
+    if (w4End && w3End) {
+      const after4Lows = pointsAfterHigh.filter(p => p.time > w4End.time && p.type === 'low' && p.price < w3End.price);
       if (after4Lows.length > 0) {
         w5End = after4Lows.reduce((min, p) => p.price < min.price ? p : min, after4Lows[0]);
       }
     }
-    // 若关键点中未找到，从K线数据取浪4之后最低点
-    if (!w5End && w4End && klineData && klineData.length > 0) {
+    // 若关键点中未找到创新低的浪5，从K线数据取浪4之后低于浪3的最低点
+    if (!w5End && w4End && w3End && klineData && klineData.length > 0) {
       const w4Time = w4End.time || (w4End.timestamp > 1e12 ? w4End.timestamp : w4End.timestamp * 1000);
       const getT = (d) => d.time || (d.timestamp > 1e12 ? d.timestamp : d.timestamp * 1000);
       const after4Kline = klineData.filter(d => getT(d) > w4Time);
@@ -954,8 +955,132 @@ function identifyWaves12345AndABC(klineData, lookbackPeriod) {
           return l < mL ? d : min;
         }, after4Kline[0]);
         const minPrice = minCandle.low ?? minCandle.close ?? minCandle.price;
-        if (minPrice < w4End.price) {
+        if (minPrice < w3End.price) {
           w5End = { type: 'low', price: minPrice, time: getT(minCandle), timestamp: minCandle.timestamp };
+        }
+      }
+    }
+    // 浪5未创新低（低于浪3）时的回溯重划分策略：
+    // 核心思路：浪3可能识别得太贪心，吃掉了浪5的下跌空间。
+    // 目标：让浪5尽可能落在全局最低点（即原浪3终点），因为在下跌推动浪中全局最低点通常是浪5终点。
+    // 策略：从晚到早反向搜索候选浪3，使浪5能尽可能覆盖到全局最低点。
+    if (!w5End && w3End && w4End && w2End) {
+      console.log('[波浪识别] 🔄 浪5未创新低，尝试回溯重新划分浪3/4/5（目标：浪5覆盖全局最低）...');
+      const origW3 = w3End; // 保留原浪3终点（即全局最低点附近）
+      const getT = (d) => d.time || (d.timestamp > 1e12 ? d.timestamp : d.timestamp * 1000);
+      let candidateHighsFromKline = []; // K线补充的候选高点
+      
+      // 收集浪2终点到原浪3终点之间所有的关键低点作为候选浪3
+      let candidateLows = pointsAfterHigh.filter(p =>
+        p.type === 'low' && p.time > w2End.time && p.time < origW3.time && p.price < w1End.price
+      );
+      
+      // 同时从K线数据补充更多候选点（用 lookback=1 识别更多极值点，确保急跌行情中也能找到反弹段）
+      if (klineData && klineData.length > 0) {
+        const w2Time = w2End.time || (w2End.timestamp > 1e12 ? w2End.timestamp : w2End.timestamp * 1000);
+        const w3Time = origW3.time || (origW3.timestamp > 1e12 ? origW3.timestamp : origW3.timestamp * 1000);
+        const kSorted = [...klineData].sort((a, b) => getT(a) - getT(b));
+        const segKline = kSorted.filter(d => getT(d) > w2Time && getT(d) <= w3Time);
+        if (segKline.length >= 3) {
+          const segPoints = identifyKeyPoints(segKline, 1);
+          // 合并到候选列表（去重）
+          for (const sp of segPoints) {
+            if (sp.type === 'low' && sp.price < w1End.price) {
+              const dup = candidateLows.find(c => Math.abs(c.time - sp.time) < 3600000);
+              if (!dup) candidateLows.push(sp);
+            }
+          }
+          // 同时补充候选高点（供后续浪4搜索使用）
+          candidateHighsFromKline = segPoints.filter(sp => sp.type === 'high');
+        }
+      }
+      
+      // **从晚到早**反向排序候选浪3（优先让浪3更靠近原浪3，使浪5能落在全局最低点）
+      candidateLows.sort((a, b) => b.time - a.time);
+      
+      let bestResult = null;
+      for (const candW3 of candidateLows) {
+        // 候选浪4：candW3之后的高点，在浪1价格区间之内
+        const candW4Arr = pointsAfterHigh.filter(p =>
+          p.type === 'high' && p.time > candW3.time && p.price > candW3.price && p.price < w1End.price
+        );
+        // 合并K线补充的候选高点
+        for (const sp of candidateHighsFromKline) {
+          if (sp.time > candW3.time && sp.price > candW3.price && sp.price < w1End.price) {
+            const dup = candW4Arr.find(c => Math.abs(c.time - sp.time) < 3600000);
+            if (!dup) candW4Arr.push(sp);
+          }
+        }
+        candW4Arr.sort((a, b) => a.time - b.time);
+        
+        for (const candW4 of candW4Arr) {
+          // 候选浪5：candW4之后的低点，必须 < candW3（创新低）
+          let candW5Arr = pointsAfterHigh.filter(p =>
+            p.type === 'low' && p.time > candW4.time && p.price < candW3.price
+          );
+          // 也从K线数据搜索浪5（使用K线的 low 字段，因为全局最低可能在影线中）
+          if (klineData && klineData.length > 0) {
+            const kSorted = [...klineData].sort((a, b) => getT(a) - getT(b));
+            const after4Kline = kSorted.filter(d => getT(d) > candW4.time);
+            // 找K线中 low 最低的那根蜡烛
+            let klineMinLow = null;
+            for (const d of after4Kline) {
+              const low = d.low ?? d.close ?? d.price;
+              if (low < candW3.price && (!klineMinLow || low < klineMinLow.price)) {
+                klineMinLow = { type: 'low', price: low, time: getT(d) };
+              }
+            }
+            if (klineMinLow) {
+              // 不做去重（允许K线low和close价格不同的情况），直接添加
+              candW5Arr.push(klineMinLow);
+            }
+          }
+          // 同样从原浪3终点区域往后的K线数据里搜索（覆盖更大范围）
+          if (klineData && klineData.length > 0) {
+            const kSorted = [...klineData].sort((a, b) => getT(a) - getT(b));
+            // 搜索 candW4 之后到数据末尾的全部 low 值
+            const after4All = kSorted.filter(d => getT(d) > candW4.time);
+            for (const d of after4All) {
+              const low = d.low ?? d.close ?? d.price;
+              if (low < candW3.price) {
+                candW5Arr.push({ type: 'low', price: low, time: getT(d) });
+              }
+            }
+          }
+          if (candW5Arr.length === 0) continue;
+          const candW5 = candW5Arr.reduce((min, p) => p.price < min.price ? p : min, candW5Arr[0]);
+          
+          // 验证规则：浪3不能是1/3/5中最短的
+          const len1 = globalHigh.price - w1End.price;
+          const len3 = w2End.price - candW3.price;
+          const len5 = candW4.price - candW5.price;
+          const minLen = Math.min(len1, len3, len5);
+          if (len3 === minLen && len1 !== len3 && len5 !== len3) continue;
+          
+          // 验证规则：浪4不能切入浪1价格区间（推动浪铁律）
+          if (candW4.price >= w1End.price) continue;
+          
+          // 合法组合 - 计算评分：浪5越低越好（优先覆盖全局最低点）
+          const score = -candW5.price; // 价格越低分数越高
+          if (!bestResult || score > bestResult.score) {
+            bestResult = { w3: candW3, w4: candW4, w5: candW5, score };
+          }
+        }
+      }
+      
+      if (bestResult) {
+        console.log('[波浪识别] ✅ 回溯成功: 浪3=' + bestResult.w3.price.toFixed(2) 
+          + ' 浪4=' + bestResult.w4.price.toFixed(2) + ' 浪5=' + bestResult.w5.price.toFixed(2));
+        w3End = bestResult.w3;
+        w4End = bestResult.w4;
+        w5End = bestResult.w5;
+      } else {
+        // 如果回溯仍然失败，标记截断浪5
+        const after4Lows = pointsAfterHigh.filter(p => p.time > w4End.time && p.type === 'low' && p.price < w4End.price);
+        if (after4Lows.length > 0) {
+          w5End = after4Lows.reduce((min, p) => p.price < min.price ? p : min, after4Lows[0]);
+          console.log('[波浪识别] ⚠️ 下跌趋势浪5未创新低（' + w5End.price.toFixed(2) + ' > 浪3终点' + w3End.price.toFixed(2) + '），'
+            + '标记为截断浪5（Truncated 5th）。');
         }
       }
     }
@@ -1193,6 +1318,21 @@ function validateImpulseRules(impulse, isUptrend) {
     const minLen = Math.min(len1, len3, len5);
     if (len3 === minLen && len1 !== len3 && len5 !== len3) {
       violations.push('3浪为最短浪（铁律：3浪不能最短）');
+    }
+  }
+
+  // 规则6：浪5必须超过浪3终点（上升趋势浪5 > 浪3，下跌趋势浪5 < 浪3）
+  // 如果浪5未超过浪3终点，称为截断浪5（Truncated 5th），属于特殊形态而非标准推动浪
+  if (w3 && w5) {
+    const p5End = w5.endPrice != null ? w5.endPrice : w5.end?.price;
+    if (isUptrend) {
+      if (p5End != null && p5End <= p3End) {
+        violations.push('浪5未超过浪3终点（截断浪5/Truncated 5th，' + (p5End?.toFixed(2) ?? '?') + ' ≤ ' + (p3End?.toFixed(2) ?? '?') + '）');
+      }
+    } else {
+      if (p5End != null && p5End >= p3End) {
+        violations.push('浪5未跌破浪3终点（截断浪5/Truncated 5th，' + (p5End?.toFixed(2) ?? '?') + ' ≥ ' + (p3End?.toFixed(2) ?? '?') + '）');
+      }
     }
   }
 

@@ -294,10 +294,13 @@ async function runWaveMode() {
  */
 function generateWaveChartHTML(klineData, waveResult, outputPath) {
   const sorted = [...klineData].sort((a, b) => (a.time || a.timestamp) - (b.time || b.timestamp));
+  // 图表Y轴应覆盖K线的完整范围（high/low），而非仅 close
+  const highs = sorted.map(d => d.high ?? d.close ?? d.price);
+  const lows = sorted.map(d => d.low ?? d.close ?? d.price);
   const prices = sorted.map(d => d.close || d.price);
   const times = sorted.map(d => d.time || d.timestamp * 1000);
-  const minP = Math.min(...prices);
-  const maxP = Math.max(...prices);
+  const minP = Math.min(...lows);
+  const maxP = Math.max(...highs);
   const range = maxP - minP || 1;
   const padding = { left: 70, right: 40, top: 30, bottom: 55 };
   const chartWidth = 1200 - padding.left - padding.right;
@@ -439,19 +442,34 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
       }
     });
   }
-  // 去重：相近价位合并为一条线（避免重叠）
-  const merged = [];
-  const threshold = range * 0.005;
-  levelLines.forEach((item) => {
-    const near = merged.find(m => Math.abs(m.price - item.price) < threshold);
-    if (near) near.labels.push(`${item.type === 'retracement' ? '回撤' : '反弹'}${item.ratio}`);
-    else merged.push({ price: item.price, labels: [`${item.type === 'retracement' ? '回撤' : '反弹'}${item.ratio}`] });
-  });
-  const levelLinesHtml = merged.map(({ price, labels }) => {
+  // 回撤线和反弹线分别生成 HTML（颜色区分，支持按类型隐藏/显示）
+  const retraceLinesHtml = levelLines.filter(l => l.type === 'retracement').map(({ price, ratio }) => {
     const y = padding.top + chartHeight - ((price - minP) / range) * chartHeight;
-    return `<line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}" stroke="#ff9800" stroke-width="1" opacity="0.7"/>
-<text x="${padding.left + chartWidth + 4}" y="${y + 4}" font-size="10" fill="#e65100">${labels.join('/')}</text>`;
+    const ratioStr = ratio.toString().replace('0.', '');
+    return `<g id="retrace-${ratioStr}">
+  <line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}" stroke="#ef5350" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <rect x="${padding.left + chartWidth + 2}" y="${y - 8}" width="56" height="16" rx="3" fill="rgba(239,83,80,0.15)" stroke="#ef5350" stroke-width="0.5"/>
+  <text x="${padding.left + chartWidth + 30}" y="${y + 4}" font-size="9" fill="#ef5350" text-anchor="middle">R ${ratio}</text>
+</g>`;
   }).join('\n');
+  const bounceLinesHtml = levelLines.filter(l => l.type === 'bounce').map(({ price, ratio }) => {
+    const y = padding.top + chartHeight - ((price - minP) / range) * chartHeight;
+    const ratioStr = ratio.toString().replace('0.', '');
+    return `<g id="bounce-${ratioStr}">
+  <line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}" stroke="#26a69a" stroke-width="1" stroke-dasharray="6,3" opacity="0.5"/>
+  <rect x="${padding.left + chartWidth + 2}" y="${y - 8}" width="56" height="16" rx="3" fill="rgba(38,166,154,0.15)" stroke="#26a69a" stroke-width="0.5"/>
+  <text x="${padding.left + chartWidth + 30}" y="${y + 4}" font-size="9" fill="#26a69a" text-anchor="middle">B ${ratio}</text>
+</g>`;
+  }).join('\n');
+  // 生成控制按钮列表
+  const retraceButtons = levelLines.filter(l => l.type === 'retracement').map(l => {
+    const ratioStr = l.ratio.toString().replace('0.', '');
+    return `<button class="ctrl-btn retrace-color active" data-layer="retrace-${ratioStr}" onclick="toggleLayer(this)">${l.ratio}</button>`;
+  }).join('\n    ');
+  const bounceButtons = levelLines.filter(l => l.type === 'bounce').map(l => {
+    const ratioStr = l.ratio.toString().replace('0.', '');
+    return `<button class="ctrl-btn bounce-color active" data-layer="bounce-${ratioStr}" onclick="toggleLayer(this)">${l.ratio}</button>`;
+  }).join('\n    ');
 
   // 预期走势虚线（浪2-浪4连线延长为通道下轨，浪5-浪a延长为预期反弹）
   const chartTop = padding.top;
@@ -467,42 +485,55 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
     const slope = (pt4.y - pt2.y) / (pt4.x - pt2.x);
     const extendX = chartRight;
     const extendY = clampY(pt4.y + slope * (extendX - pt4.x));
-    trendLineHtml += `<line x1="${pt2.x}" y1="${pt2.y}" x2="${extendX}" y2="${extendY}" stroke="#9c27b0" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.8"/>`;
+    trendLineHtml += `<line x1="${pt2.x}" y1="${pt2.y}" x2="${extendX}" y2="${extendY}" stroke="#ab47bc" stroke-width="1.2" stroke-dasharray="8,4" opacity="0.7"/>`;
   }
   if (pt5 && ptA && ptA.x > pt5.x) {
     const slope = (ptA.y - pt5.y) / (ptA.x - pt5.x);
     const extendX = chartRight;
     const extendY = clampY(ptA.y + slope * (extendX - ptA.x));
-    trendLineHtml += `<line x1="${pt5.x}" y1="${pt5.y}" x2="${extendX}" y2="${extendY}" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.8"/>`;
+    trendLineHtml += `<line x1="${pt5.x}" y1="${pt5.y}" x2="${extendX}" y2="${extendY}" stroke="#42a5f5" stroke-width="1.2" stroke-dasharray="8,4" opacity="0.7"/>`;
   }
 
-  // Y 轴刻度（价格）
+  // Y 轴刻度（价格）- 暗色主题
   const yTicks = 6;
   const yAxisHtml = Array.from({ length: yTicks }, (_, i) => {
     const p = minP + (range * i) / (yTicks - 1);
     const y = padding.top + chartHeight - ((p - minP) / range) * chartHeight;
-    return `<line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}" stroke="#e0e0e0" stroke-dasharray="2,2"/>
-<text x="${padding.left - 8}" y="${y + 4}" font-size="11" fill="#666" text-anchor="end">${p.toFixed(0)}</text>`;
+    return `<line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}" stroke="#1e222d" stroke-dasharray="2,4"/>
+<text x="${padding.left - 8}" y="${y + 4}" font-size="10" fill="#4a5568" text-anchor="end">${p.toFixed(0)}</text>`;
   }).join('\n');
 
-  // X 轴刻度（时间）
+  // X 轴刻度（时间）- 暗色主题
   const xTicks = 6;
   const xAxisHtml = Array.from({ length: xTicks }, (_, i) => {
     const idx = Math.round((i / (xTicks - 1)) * (times.length - 1));
     const t = times[Math.min(idx, times.length - 1)];
     const x = padding.left + (idx / Math.max(times.length - 1, 1)) * chartWidth;
     const timeStr = new Date(t).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-    return `<line x1="${x}" y1="${padding.top}" x2="${x}" y2="${padding.top + chartHeight}" stroke="#e0e0e0" stroke-dasharray="2,2"/>
-<text x="${x}" y="${padding.top + chartHeight + 20}" font-size="11" fill="#666" text-anchor="middle">${timeStr}</text>`;
+    return `<line x1="${x}" y1="${padding.top}" x2="${x}" y2="${padding.top + chartHeight}" stroke="#1e222d" stroke-dasharray="2,4"/>
+<text x="${x}" y="${padding.top + chartHeight + 17}" font-size="10" fill="#4a5568" text-anchor="middle">${timeStr}</text>`;
   }).join('\n');
 
+  // 波浪点位颜色逻辑：起点(橙色)、下跌浪(红色)、上涨浪/反弹(绿色)、调整浪(蓝色)、预测(橙色)
+  const getPointColor = (pt, idx) => {
+    if (pt.isPredicted) return '#ff9800';
+    if (pt.isStart) return '#ff9800';
+    const label = pt.label;
+    if (label.includes('a') || label.includes('b') || label.includes('c') || label.includes('W') || label.includes('X') || label.includes('Y')) return '#42a5f5';
+    // 判断涨跌：与前一个点比较
+    if (idx > 0) {
+      return pt.p < points[idx - 1].p ? '#ef5350' : '#26a69a';
+    }
+    return '#ef5350';
+  };
   const pointsHtml = points.map((pt, i) => {
-    const isPredicted = pt.isPredicted === true;
-    const fill = isPredicted ? '#ff9800' : 'red';
-    const r = pt.isStart ? 5 : 8;
+    const color = getPointColor(pt, i);
+    const r = pt.isStart ? 3 : 3.5;
+    // 文字偏移：下跌浪标签放下方，上涨浪标签放上方
+    const textY = (i > 0 && pt.p < points[i - 1].p) ? pt.y + 16 : pt.y - 10;
     return `<g class="point" data-index="${i}">
-  <circle cx="${pt.x}" cy="${pt.y}" r="${r}" fill="${fill}" stroke="white" stroke-width="2" style="cursor:pointer"/>
-  <text x="${pt.x}" y="${pt.y - 14}" font-size="12" fill="${fill}" text-anchor="middle">${pt.label} ${pt.p.toFixed(0)}</text>
+  <circle cx="${pt.x}" cy="${pt.y}" r="${r}" fill="${color}" stroke="${color}" stroke-width="1.5" opacity="0.9" style="cursor:pointer"/>
+  <text x="${pt.x}" y="${textY}" font-size="10" fill="${color}" text-anchor="middle" font-weight="500">${pt.label} ${pt.p.toFixed(0)}</text>
 </g>`;
   }).join('\n');
 
@@ -518,45 +549,115 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
     close: (d.close ?? d.price).toFixed(2)
   }));
 
+  // 底部数据面板：波浪幅度信息
+  const dpItems = [];
+  // 底部数据面板：使用K线的 high/low 来统计真实的高低点
+  const dpHigh = Math.max(...highs).toFixed(2);
+  const dpLow = Math.min(...lows).toFixed(2);
+  const dpRange = (Math.max(...highs) - Math.min(...lows)).toFixed(2);
+  points.forEach((pt, i) => {
+    if (i === 0) return;
+    const diff = pt.p - points[i - 1].p;
+    const sign = diff >= 0 ? '+' : '';
+    const cls = diff >= 0 ? 'dp-up' : 'dp-down';
+    dpItems.push({ label: pt.label + '幅度', value: sign + diff.toFixed(2), cls });
+  });
+  const dpHtml = dpItems.map(d => `<div class="dp-item"><span class="dp-label">${d.label}:</span><span class="dp-value ${d.cls}">${d.value}</span></div>`).join('\n  ');
+
   const html = `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>黄金波浪点位图</title>
 <style>
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; overflow: hidden; background: #1a1d23; color: #e0e0e0; }
   body { display: flex; flex-direction: column; }
-  #header { flex-shrink: 0; padding: 8px 20px; background: #f5f5f5; border-bottom: 1px solid #ddd; }
-  #header h2 { margin: 0 0 4px 0; font-size: 18px; }
-  #header p { margin: 0; font-size: 12px; color: #666; }
-  #chart-wrap { flex: 1; min-height: 0; padding: 0; }
+  #header { flex-shrink: 0; padding: 12px 24px; background: linear-gradient(135deg, #1e222d 0%, #252a37 100%); border-bottom: 1px solid #2a2e3a; display: flex; align-items: center; justify-content: space-between; }
+  #header .title-area { display: flex; align-items: center; gap: 16px; }
+  #header h2 { font-size: 16px; font-weight: 600; color: #e8e8e8; letter-spacing: 0.5px; }
+  #header .badge { background: #2962ff; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+  #header .info { font-size: 12px; color: #848e9c; }
+  #controls { flex-shrink: 0; padding: 8px 24px; background: #1e222d; border-bottom: 1px solid #2a2e3a; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .ctrl-group { display: flex; align-items: center; gap: 4px; margin-right: 12px; }
+  .ctrl-group .ctrl-label { font-size: 11px; color: #848e9c; margin-right: 4px; white-space: nowrap; }
+  .ctrl-btn { font-size: 11px; padding: 3px 10px; border: 1px solid #2a2e3a; border-radius: 4px; background: #252a37; color: #848e9c; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+  .ctrl-btn:hover { border-color: #4a5568; color: #e0e0e0; }
+  .ctrl-btn.active { border-color: #2962ff; color: #2962ff; background: rgba(41,98,255,0.08); }
+  .ctrl-btn.retrace-color { border-color: #ef5350; }
+  .ctrl-btn.retrace-color.active { border-color: #ef5350; color: #ef5350; background: rgba(239,83,80,0.08); }
+  .ctrl-btn.bounce-color { border-color: #26a69a; }
+  .ctrl-btn.bounce-color.active { border-color: #26a69a; color: #26a69a; background: rgba(38,166,154,0.08); }
+  #chart-wrap { flex: 1; min-height: 0; padding: 0; background: #131722; }
   #chart-wrap svg { width: 100%; height: 100%; display: block; }
-  #tooltip { position: fixed; background: rgba(0,0,0,0.85); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; pointer-events: none; display: none; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-  .point:hover circle { opacity: 0.9; }
+  #tooltip { position: fixed; background: rgba(30,34,45,0.96); color: #e0e0e0; padding: 10px 14px; border-radius: 6px; font-size: 12px; pointer-events: none; display: none; z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,0.5); border: 1px solid #2a2e3a; line-height: 1.7; max-width: 320px; }
+  #tooltip .tt-title { color: #2962ff; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  #tooltip .tt-up { color: #26a69a; }
+  #tooltip .tt-down { color: #ef5350; }
+  #tooltip .tt-label { color: #848e9c; }
+  #tooltip .tt-divider { border-top: 1px solid #2a2e3a; margin: 4px 0; }
+  #data-panel { flex-shrink: 0; padding: 8px 24px; background: #1e222d; border-top: 1px solid #2a2e3a; display: flex; gap: 24px; flex-wrap: wrap; font-size: 12px; }
+  .dp-item { display: flex; align-items: center; gap: 4px; }
+  .dp-item .dp-label { color: #848e9c; }
+  .dp-item .dp-value { color: #e8e8e8; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .dp-item .dp-up { color: #26a69a; }
+  .dp-item .dp-down { color: #ef5350; }
+  .point:hover circle { filter: brightness(1.3); }
 </style>
 </head>
 <body>
 <div id="header">
-<h2>黄金1小时K线 - 艾略特波浪点位</h2>
-<p>数据范围: ${new Date(times[0]).toLocaleString('zh-CN')} ~ ${new Date(times[times.length - 1]).toLocaleString('zh-CN')} | 橙色: 回撤/反弹位 | 紫色虚线: 通道线 | 蓝色虚线: 预期走势</p>
+  <div class="title-area">
+    <h2>黄金1小时K线 - 艾略特波浪点位</h2>
+    <span class="badge">XAUUSD H1</span>
+  </div>
+  <div class="info">数据范围: ${new Date(times[0]).toLocaleString('zh-CN')} ~ ${new Date(times[times.length - 1]).toLocaleString('zh-CN')}</div>
+</div>
+<div id="controls">
+  <div class="ctrl-group">
+    <span class="ctrl-label">回撤位:</span>
+    ${retraceButtons}
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">反弹位:</span>
+    ${bounceButtons}
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">其他:</span>
+    <button class="ctrl-btn active" data-layer="channel-line" onclick="toggleLayer(this)">通道线</button>
+    <button class="ctrl-btn active" data-layer="wave-line" onclick="toggleLayer(this)">波浪连线</button>
+    <button class="ctrl-btn active" data-layer="wave-points" onclick="toggleLayer(this)">波浪点位</button>
+  </div>
 </div>
 <div id="tooltip"></div>
 <div id="chart-wrap">
-<svg viewBox="0 0 1200 460" preserveAspectRatio="xMidYMid meet" style="border:1px solid #ccc">
-  <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa"/>
+<svg viewBox="0 0 1200 460" preserveAspectRatio="xMidYMid meet">
+  <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}" fill="#131722"/>
   ${yAxisHtml}
   ${xAxisHtml}
-  <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" stroke="#333" stroke-width="1"/>
-  <line x1="${padding.left}" y1="${padding.top + chartHeight}" x2="${padding.left + chartWidth}" y2="${padding.top + chartHeight}" stroke="#333" stroke-width="1"/>
-  ${levelLinesHtml}
-  <path d="${pathStr}" fill="none" stroke="#2196F3" stroke-width="2"/>
-  ${wavePathStr ? `<path d="${wavePathStr}" fill="none" stroke="#95a5a6" stroke-width="1.5"/>` : ''}
-  ${wavePathPredStr ? `<path d="${wavePathPredStr}" fill="none" stroke="#ff9800" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.9"/>` : ''}
-  ${trendLineHtml}
-  <line id="crosshair-v" x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" stroke="#999" stroke-width="1" stroke-dasharray="4,4" style="display:none; pointer-events:none"/>
-  <line id="crosshair-h" x1="${padding.left}" y1="${padding.top}" x2="${padding.left + chartWidth}" y2="${padding.top}" stroke="#999" stroke-width="1" stroke-dasharray="4,4" style="display:none; pointer-events:none"/>
+  <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" stroke="#2a2e3a" stroke-width="1"/>
+  <line x1="${padding.left}" y1="${padding.top + chartHeight}" x2="${padding.left + chartWidth}" y2="${padding.top + chartHeight}" stroke="#2a2e3a" stroke-width="1"/>
+  ${retraceLinesHtml}
+  ${bounceLinesHtml}
+  <path d="${pathStr}" fill="none" stroke="#2962ff" stroke-width="1.5" opacity="0.9"/>
+  <g id="wave-line">
+    ${wavePathStr ? `<path d="${wavePathStr}" fill="none" stroke="#848e9c" stroke-width="1.2"/>` : ''}
+    ${wavePathPredStr ? `<path d="${wavePathPredStr}" fill="none" stroke="#ff9800" stroke-width="1.2" stroke-dasharray="8,4" opacity="0.9"/>` : ''}
+  </g>
+  <g id="channel-line">${trendLineHtml}</g>
+  <line id="crosshair-v" x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" stroke="#4a5568" stroke-width="1" stroke-dasharray="4,4" style="display:none; pointer-events:none"/>
+  <line id="crosshair-h" x1="${padding.left}" y1="${padding.top}" x2="${padding.left + chartWidth}" y2="${padding.top}" stroke="#4a5568" stroke-width="1" stroke-dasharray="4,4" style="display:none; pointer-events:none"/>
+  <g id="crosshair-price-tag" style="display:none; pointer-events:none">
+    <rect id="crosshair-price-bg" x="0" y="0" width="52" height="18" rx="3" fill="rgba(41,98,255,0.9)"/>
+    <text id="crosshair-price-text" x="0" y="0" font-size="10" fill="#fff" text-anchor="end" dominant-baseline="middle"></text>
+  </g>
   <rect id="chart-overlay" x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}" fill="transparent" style="cursor:crosshair"/>
-  ${pointsHtml}
+  <g id="wave-points">${pointsHtml}</g>
 </svg>
+</div>
+<div id="data-panel">
+  <div class="dp-item"><span class="dp-label">最高:</span><span class="dp-value">${dpHigh}</span></div>
+  <div class="dp-item"><span class="dp-label">最低:</span><span class="dp-value">${dpLow}</span></div>
+  <div class="dp-item"><span class="dp-label">振幅:</span><span class="dp-value">${dpRange}</span></div>
+  ${dpHtml}
 </div>
 <script>
   const pts = ${JSON.stringify(pointsData)};
@@ -564,19 +665,30 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
   const PADDING = ${JSON.stringify(padding)};
   const CHART_WIDTH = ${chartWidth};
   const CHART_HEIGHT = ${chartHeight};
+  const PRICE_MIN = ${minP.toFixed(2)};
+  const PRICE_MAX = ${maxP.toFixed(2)};
   const tooltip = document.getElementById('tooltip');
   const crosshairV = document.getElementById('crosshair-v');
   const crosshairH = document.getElementById('crosshair-h');
+  const crosshairPriceTag = document.getElementById('crosshair-price-tag');
+  const crosshairPriceBg = document.getElementById('crosshair-price-bg');
+  const crosshairPriceText = document.getElementById('crosshair-price-text');
   const overlay = document.getElementById('chart-overlay');
   const svg = document.querySelector('svg');
 
-  const TOOLTIP_OFFSET = 12;
+  function toggleLayer(btn) {
+    const el = document.getElementById(btn.dataset.layer);
+    if (!el) return;
+    const isActive = btn.classList.toggle('active');
+    el.style.display = isActive ? '' : 'none';
+  }
+
+  const TOOLTIP_OFFSET = 14;
   function positionTooltipInViewport(x, y) {
     tooltip.style.left = (x + TOOLTIP_OFFSET) + 'px';
     tooltip.style.top = (y + TOOLTIP_OFFSET) + 'px';
     const rect = tooltip.getBoundingClientRect();
-    let left = x + TOOLTIP_OFFSET;
-    let top = y + TOOLTIP_OFFSET;
+    let left = x + TOOLTIP_OFFSET, top = y + TOOLTIP_OFFSET;
     if (rect.right > window.innerWidth) left = x - rect.width - TOOLTIP_OFFSET;
     if (rect.bottom > window.innerHeight) top = y - rect.height - TOOLTIP_OFFSET;
     left = Math.max(8, Math.min(left, window.innerWidth - rect.width - 8));
@@ -585,16 +697,9 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
     tooltip.style.top = top + 'px';
   }
 
-  function getMouseX(e) {
-    const rect = svg.getBoundingClientRect();
-    const scaleX = 1200 / rect.width;
-    return (e.clientX - rect.left) * scaleX;
-  }
-  function getMouseY(e) {
-    const rect = svg.getBoundingClientRect();
-    const scaleY = 460 / rect.height;
-    return (e.clientY - rect.top) * scaleY;
-  }
+  function getMouseX(e) { const r = svg.getBoundingClientRect(); return (e.clientX - r.left) * (1200 / r.width); }
+  function getMouseY(e) { const r = svg.getBoundingClientRect(); return (e.clientY - r.top) * (460 / r.height); }
+  function yToPrice(y) { return PRICE_MAX - ((y - PADDING.top) / CHART_HEIGHT) * (PRICE_MAX - PRICE_MIN); }
 
   function showKlineTooltip(e) {
     const x = getMouseX(e);
@@ -602,46 +707,53 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
     const t = (x - PADDING.left) / CHART_WIDTH;
     const idx = Math.round(t * (chartData.length - 1));
     const d = chartData[Math.min(idx, chartData.length - 1)];
-    let html = '时间: ' + d.time + '<br/>收盘: ' + d.price;
-    if (d.open != null) html += '<br/>开盘: ' + d.open;
-    if (d.high != null) html += ' 最高: ' + d.high;
-    if (d.low != null) html += ' 最低: ' + d.low;
+    const o = parseFloat(d.open), h = parseFloat(d.high), l = parseFloat(d.low), c = parseFloat(d.close);
+    const change = c - o, changePct = ((change / o) * 100).toFixed(2);
+    const changeSign = change >= 0 ? '+' : '', changeClass = change >= 0 ? 'tt-up' : 'tt-down';
+    let html = '<div class="tt-title">' + d.time + '</div>';
+    html += '<div><span class="tt-label">开盘:</span> ' + d.open + '&nbsp;&nbsp;<span class="tt-label">收盘:</span> ' + d.close + '</div>';
+    html += '<div><span class="tt-label">最高:</span> ' + d.high + '&nbsp;&nbsp;<span class="tt-label">最低:</span> ' + d.low + '</div>';
+    html += '<div class="tt-divider"></div>';
+    html += '<div><span class="tt-label">涨跌:</span> <span class="' + changeClass + '">' + changeSign + change.toFixed(2) + ' (' + changeSign + changePct + '%)</span></div>';
+    html += '<div><span class="tt-label">振幅:</span> ' + (h - l).toFixed(2) + '</div>';
     tooltip.innerHTML = html;
     tooltip.style.display = 'block';
     positionTooltipInViewport(e.clientX, e.clientY);
-    crosshairV.setAttribute('x1', x);
-    crosshairV.setAttribute('x2', x);
-    crosshairV.style.display = 'block';
+    crosshairV.setAttribute('x1', x); crosshairV.setAttribute('x2', x); crosshairV.style.display = 'block';
     const y = getMouseY(e);
-    crosshairH.setAttribute('y1', y);
-    crosshairH.setAttribute('y2', y);
-    crosshairH.setAttribute('x1', PADDING.left);
-    crosshairH.setAttribute('x2', PADDING.left + CHART_WIDTH);
+    crosshairH.setAttribute('y1', y); crosshairH.setAttribute('y2', y);
+    crosshairH.setAttribute('x1', PADDING.left); crosshairH.setAttribute('x2', PADDING.left + CHART_WIDTH);
     crosshairH.style.display = 'block';
+    if (y >= PADDING.top && y <= PADDING.top + CHART_HEIGHT) {
+      crosshairPriceText.textContent = yToPrice(y).toFixed(0);
+      crosshairPriceBg.setAttribute('x', 8); crosshairPriceBg.setAttribute('y', y - 9);
+      crosshairPriceText.setAttribute('x', 56); crosshairPriceText.setAttribute('y', y);
+      crosshairPriceTag.style.display = 'block';
+    } else { crosshairPriceTag.style.display = 'none'; }
   }
 
   overlay.addEventListener('mouseenter', showKlineTooltip);
-  overlay.addEventListener('mousemove', function(e) {
-    showKlineTooltip(e);
-  });
+  overlay.addEventListener('mousemove', showKlineTooltip);
   overlay.addEventListener('mouseleave', function() {
-    tooltip.style.display = 'none';
-    crosshairV.style.display = 'none';
-    crosshairH.style.display = 'none';
+    tooltip.style.display = 'none'; crosshairV.style.display = 'none'; crosshairH.style.display = 'none'; crosshairPriceTag.style.display = 'none';
   });
 
   document.querySelectorAll('.point').forEach((g, i) => {
     g.addEventListener('mouseenter', function(e) {
-      tooltip.innerHTML = '<strong>' + pts[i].label + '</strong><br/>时间: ' + pts[i].time + '<br/>价格: ' + pts[i].price;
-      tooltip.style.display = 'block';
+      const p = pts[i]; let html = '<div class="tt-title">' + p.label + '</div>';
+      html += '<div><span class="tt-label">时间:</span> ' + p.time + '</div>';
+      html += '<div><span class="tt-label">价格:</span> ' + p.price + '</div>';
+      if (i > 0) {
+        const diff = parseFloat(p.price) - parseFloat(pts[i-1].price);
+        const sign = diff >= 0 ? '+' : '', cls = diff >= 0 ? 'tt-up' : 'tt-down';
+        html += '<div class="tt-divider"></div><div><span class="tt-label">距' + pts[i-1].label + ':</span> <span class="' + cls + '">' + sign + diff.toFixed(2) + '</span></div>';
+      }
+      tooltip.innerHTML = html; tooltip.style.display = 'block';
       positionTooltipInViewport(e.clientX, e.clientY);
-      crosshairV.style.display = 'none';
-      crosshairH.style.display = 'none';
+      crosshairV.style.display = 'none'; crosshairH.style.display = 'none'; crosshairPriceTag.style.display = 'none';
     });
     g.addEventListener('mouseleave', function() { tooltip.style.display = 'none'; });
-    g.addEventListener('mousemove', function(e) {
-      positionTooltipInViewport(e.clientX, e.clientY);
-    });
+    g.addEventListener('mousemove', function(e) { positionTooltipInViewport(e.clientX, e.clientY); });
   });
 </script>
 </body>
