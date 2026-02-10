@@ -61,6 +61,7 @@ const { formatOutputCompact, formatOutput, formatWavePointsOutput } = require('.
 const { GOLD_HISTORY_DATA_FILE } = require('./src/config/config');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 // ==================== 时间范围解析与过滤 ====================
 
@@ -211,13 +212,28 @@ async function runWaveMode() {
     console.log(`   时间范围: 从 ${startDate} 起`);
   }
   if (doFetch) console.log('   将自动抓取最新数据（若不足）');
+  if (genChart && timeframe === 'H1') {
+    console.log('   生成图表前自动抓取最新数据...');
+  }
 
   let klineData;
   if (timeframe === 'H1') {
-    klineData = loadGoldDataFromFile();
-    if (doFetch && klineData.length < 500) {
-      klineData = await fetchOrLoadGoldData(startDate);
+    // 生成图表时默认抓取最新数据，确保图表包含到今天的 K 线
+    if (genChart) {
+      const fetchStart = timeRange ? new Date(timeRange.startMs).toISOString().slice(0, 10) : startDate;
+      try {
+        console.log(`   🔄 抓取最新数据（${fetchStart} ~ 当前）...`);
+        execSync(`node fetch_year_data.js ${fetchStart}`, { cwd: __dirname, stdio: 'inherit' });
+      } catch (e) {
+        console.warn('   ⚠️ 抓取失败，使用本地已有数据:', e.message);
+      }
+    } else if (doFetch) {
+      const loaded = loadGoldDataFromFile();
+      if (loaded.length < 500) {
+        await fetchOrLoadGoldData(startDate);
+      }
     }
+    klineData = loadGoldDataFromFile();
   } else {
     // H4 / D1：从对应周期文件加载
     const filePath = cfg?.FILE_PATH;
@@ -521,6 +537,21 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
   const overlay = document.getElementById('chart-overlay');
   const svg = document.querySelector('svg');
 
+  const TOOLTIP_OFFSET = 12;
+  function positionTooltipInViewport(x, y) {
+    tooltip.style.left = (x + TOOLTIP_OFFSET) + 'px';
+    tooltip.style.top = (y + TOOLTIP_OFFSET) + 'px';
+    const rect = tooltip.getBoundingClientRect();
+    let left = x + TOOLTIP_OFFSET;
+    let top = y + TOOLTIP_OFFSET;
+    if (rect.right > window.innerWidth) left = x - rect.width - TOOLTIP_OFFSET;
+    if (rect.bottom > window.innerHeight) top = y - rect.height - TOOLTIP_OFFSET;
+    left = Math.max(8, Math.min(left, window.innerWidth - rect.width - 8));
+    top = Math.max(8, Math.min(top, window.innerHeight - rect.height - 8));
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+  }
+
   function getMouseX(e) {
     const rect = svg.getBoundingClientRect();
     const scaleX = 1200 / rect.width;
@@ -544,8 +575,7 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
     if (d.low != null) html += ' 最低: ' + d.low;
     tooltip.innerHTML = html;
     tooltip.style.display = 'block';
-    tooltip.style.left = (e.pageX + 12) + 'px';
-    tooltip.style.top = (e.pageY + 12) + 'px';
+    positionTooltipInViewport(e.clientX, e.clientY);
     crosshairV.setAttribute('x1', x);
     crosshairV.setAttribute('x2', x);
     crosshairV.style.display = 'block';
@@ -571,15 +601,13 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
     g.addEventListener('mouseenter', function(e) {
       tooltip.innerHTML = '<strong>' + pts[i].label + '</strong><br/>时间: ' + pts[i].time + '<br/>价格: ' + pts[i].price;
       tooltip.style.display = 'block';
-      tooltip.style.left = (e.pageX + 12) + 'px';
-      tooltip.style.top = (e.pageY + 12) + 'px';
+      positionTooltipInViewport(e.clientX, e.clientY);
       crosshairV.style.display = 'none';
       crosshairH.style.display = 'none';
     });
     g.addEventListener('mouseleave', function() { tooltip.style.display = 'none'; });
     g.addEventListener('mousemove', function(e) {
-      tooltip.style.left = (e.pageX + 12) + 'px';
-      tooltip.style.top = (e.pageY + 12) + 'px';
+      positionTooltipInViewport(e.clientX, e.clientY);
     });
   });
 </script>

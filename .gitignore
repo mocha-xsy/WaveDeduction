@@ -27,3 +27,5 @@ appveyor.yml
 **/*.out
 **/*.log.*
 **/run
+# Playwright 持久化用户目录（含 Cookie，用于规避 Cloudflare）
+.investing-playwright-profile/

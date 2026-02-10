@@ -1,14 +1,19 @@
 /**
  * 黄金历史数据抓取脚本
  *
- * 使用 Playwright 模拟浏览器请求 tvc4.investing.com 的 history API，绕过 Cloudflare 限制。
+ * 使用 Playwright 请求 tvc4.investing.com 的 history API。为规避 Cloudflare：
+ * - 使用系统安装的 Chrome（channel: 'chrome'）并持久化用户目录，首次可用 --no-headless 弹窗通过验证，后续复用 Cookie
+ * - 或从浏览器 Network 复制 history 请求 URL 中的 token 更新 TVC_API_CONFIG
  *
- * 前置：npm install && npx playwright install chromium
+ * 前置：npm install playwright && npx playwright install chromium
+ *       使用原生 Chrome 时需已安装 Chrome 浏览器
  *
- * 用法：node fetch_year_data.js [开始日期]
+ * 用法：node fetch_year_data.js [开始日期] [--no-headless]
  * 示例：node fetch_year_data.js 2025-01-01
+ *       node fetch_year_data.js 2025-01-01 --no-headless   # 首次建议用可见浏览器通过 Cloudflare
  */
 const fs = require('fs');
+const path = require('path');
 
 // Investing.com TVC API 配置
 // token 会过期，若请求失败请从浏览器 Network 面板复制最新 history 请求 URL 中的 token 更新
@@ -113,7 +118,15 @@ function processData(allData) {
     };
 }
 
-async function fetchDataViaPlaywright(ranges) {
+function parseArgs() {
+    const argv = process.argv.slice(2);
+    const noHeadless = argv.includes('--no-headless') || argv.includes('--visible');
+    const startDate = argv.find(a => !a.startsWith('--')) || '2025-01-01';
+    return { noHeadless, startDate };
+}
+
+async function fetchDataViaPlaywright(ranges, options = {}) {
+    const { noHeadless = false } = options;
     let playwright;
     try {
         playwright = require('playwright');
@@ -122,20 +135,39 @@ async function fetchDataViaPlaywright(ranges) {
     }
 
     const { tokenPart1, tokenPart2, referer } = TVC_API_CONFIG;
-    const browser = await playwright.chromium.launch({
-        headless: true,
+    const userDataDir = path.join(__dirname, '.investing-playwright-profile');
+    const contextOptions = {
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        viewport: { width: 1280, height: 720 },
+        locale: 'zh-CN',
+        extraHTTPHeaders: { Referer: referer },
+        headless: !noHeadless,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+    };
+
+    let context;
+    let browserToClose = null;
+    try {
+        context = await playwright.chromium.launchPersistentContext(userDataDir, {
+            channel: 'chrome',
+            ...contextOptions
+        });
+    } catch (e) {
+        console.warn('未找到系统 Chrome，改用 Chromium:', e.message);
+        browserToClose = await playwright.chromium.launch({
+            headless: !noHeadless,
+            args: contextOptions.args
+        });
+        context = await browserToClose.newContext({
+            userAgent: contextOptions.userAgent,
+            viewport: contextOptions.viewport,
+            locale: contextOptions.locale,
+            extraHTTPHeaders: contextOptions.extraHTTPHeaders
+        });
+    }
 
     const allData = [];
     try {
-        const context = await browser.newContext({
-            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            viewport: { width: 1280, height: 720 },
-            locale: 'zh-CN',
-            extraHTTPHeaders: { Referer: referer }
-        });
-
         const page = await context.newPage();
 
         for (let i = 0; i < ranges.length; i++) {
@@ -144,13 +176,28 @@ async function fetchDataViaPlaywright(ranges) {
             console.log(`[${i + 1}/${ranges.length}] 请求 ${url.substring(0, 90)}...`);
 
             let batch = null;
+            let responseStatus = null;
+            let responseBodyPreview = '';
             try {
                 const response = await page.goto(url, {
                     waitUntil: 'domcontentloaded',
                     timeout: 30000
                 });
-                if (response && response.ok()) {
-                    batch = await response.json();
+                if (response) {
+                    responseStatus = response.status();
+                    const text = await response.text();
+                    responseBodyPreview = text.slice(0, 600);
+                    if (response.ok()) {
+                        try {
+                            if (text.trim().startsWith('{')) batch = JSON.parse(text);
+                        } catch (parseErr) {
+                            console.warn(`  JSON 解析失败: ${parseErr.message}`);
+                        }
+                    }
+                    if (!response.ok() || !(batch && batch.t && batch.t.length > 0)) {
+                        console.warn(`  无数据 [HTTP ${responseStatus}]`);
+                        console.warn(`  响应预览: ${responseBodyPreview.replace(/\n/g, ' ')}`);
+                    }
                 }
             } catch (e) {
                 console.warn(`  请求失败: ${e.message}`);
@@ -159,23 +206,23 @@ async function fetchDataViaPlaywright(ranges) {
             if (batch && batch.t && batch.t.length > 0) {
                 allData.push(batch);
                 console.log(`  成功: ${batch.t.length} 条`);
-            } else {
-                console.warn(`  无数据`);
             }
 
             await page.waitForTimeout(800);
         }
     } finally {
-        await browser.close();
+        await context.close();
+        if (browserToClose) await browserToClose.close();
     }
     return allData;
 }
 
 async function main() {
     try {
+        const { noHeadless, startDate: startDateString } = parseArgs();
         console.log('Starting to fetch gold data (Playwright)...');
+        if (noHeadless) console.log('使用可见浏览器（--no-headless），首次可手动通过 Cloudflare 验证，会话将保存到 .investing-playwright-profile');
 
-        const startDateString = process.argv[2] || '2025-01-01';
         const from = parseStartDate(startDateString);
         const to = Math.floor(Date.now() / 1000);
 
@@ -184,7 +231,7 @@ async function main() {
         const ranges = getBatchRanges(from, to);
         console.log(`共 ${ranges.length} 批`);
 
-        const allData = await fetchDataViaPlaywright(ranges);
+        const allData = await fetchDataViaPlaywright(ranges, { noHeadless });
 
         if (allData.length > 0) {
             const finalData = processData(allData);
@@ -196,21 +243,12 @@ async function main() {
                 console.log(`时间范围: ${finalData.data[0].time} ~ ${finalData.data[finalData.data.length - 1].time}`);
             }
         } else {
-            console.warn('未获取到有效数据，生成模拟数据...');
-            const mockData = ranges.map(r => {
-                const points = generateMockData(r.from, r.to);
-                return {
-                    t: points.map(p => p.timestamp),
-                    c: points.map(p => p.close),
-                    o: points.map(p => p.open),
-                    h: points.map(p => p.high),
-                    l: points.map(p => p.low),
-                    v: points.map(p => p.volume)
-                };
-            });
-            const finalData = processData(mockData);
-            fs.writeFileSync('gold_1year_data_mock.json', JSON.stringify(finalData, null, 2));
-            console.log('模拟数据已保存: gold_1year_data_mock.json');
+            console.error('未获取到有效数据，不生成模拟数据。请检查：');
+            console.error('  若上方响应预览为 "Just a moment..." 则为 Cloudflare 拦截（常见 HTTP 403）：用本机浏览器打开 https://www.investing.com 黄金历史数据，通过验证后，在 Network 里找到 tvc4.investing.com 的 history 请求，复制 URL 中两段 token 更新本文件 TVC_API_CONFIG 的 tokenPart1、tokenPart2；或把 launch 里 headless 改为 false 用可见浏览器跑一次。');
+            console.error('  1) 更新 TVC_API_CONFIG 的 tokenPart1/tokenPart2（从浏览器 history 请求 URL 复制）');
+            console.error('  2) 请求时间范围是否合理（from/to 为 Unix 秒）');
+            console.error('  3) 根据上方「响应预览」确认接口实际返回内容');
+            process.exit(1);
         }
     } catch (error) {
         console.error('Error:', error.message);
