@@ -529,7 +529,8 @@ function identifyWaves12345AndABC(klineData, lookbackPeriod) {
   if (!klineData || klineData.length < 32) return null;
 
   // 数据量少时用小 lookback，否则高低点过少导致识别失败（如 160 条用 8 只得 2 个高点）
-  const lp = lookbackPeriod != null ? lookbackPeriod : (klineData.length < 300 ? 4 : 6);
+  // 修复：< 100 条用 3（识别更密集的小波动），100-300 条用 4，> 300 条用 6
+  const lp = lookbackPeriod != null ? lookbackPeriod : (klineData.length < 100 ? 3 : klineData.length < 300 ? 4 : 6);
 
   const keyPoints = identifyKeyPoints(klineData, lp);
   if (keyPoints.length < 6) return null;
@@ -560,6 +561,7 @@ function identifyWaves12345AndABC(klineData, lookbackPeriod) {
     let w1End = null, w2End = null, w3End = null, w4End = null, w5End = null;
     let cursor = 0;
 
+    // 浪1：全局低点之后的第一个高点
     for (let i = 0; i < pointsAfterLow.length; i++) {
       const p = pointsAfterLow[i];
       if (p.type === 'high' && !w1End) {
@@ -568,48 +570,232 @@ function identifyWaves12345AndABC(klineData, lookbackPeriod) {
         break;
       }
     }
+    // 浪2：浪1终点之后的第一个低点（标准：< 浪1终点；优先从关键点找，找不到再从K线直接找）
     for (let i = cursor + 1; i < pointsAfterLow.length; i++) {
       const p = pointsAfterLow[i];
-      if (p.type === 'low' && !w2End) {
+      if (p.type === 'low' && p.price < w1End.price && !w2End) {
         w2End = p;
         cursor = i;
         break;
       }
     }
-    for (let i = cursor + 1; i < pointsAfterLow.length; i++) {
-      const p = pointsAfterLow[i];
-      if (p.type === 'high' && p.price > w1End.price && !w3End) {
-        w3End = p;
-        cursor = i;
-        break;
+    // 若关键点中无标准浪2，从 K 线数据中直接寻找浪1终点之后最低的 low（更准确）
+    if (!w2End && klineData && klineData.length > 0) {
+      const w1Time = w1End.time || w1End.timestamp * 1000;
+      const getT = (d) => d.time || (d.timestamp > 1e12 ? d.timestamp : d.timestamp * 1000);
+      const afterW1 = klineData.filter(d => getT(d) > w1Time);
+      if (afterW1.length > 0) {
+        // 取后续 K 线中最低的 low（不超过20根，避免跨度太大）
+        const searchRange = afterW1.slice(0, 20);
+        const minLow = searchRange.reduce((min, d) => {
+          const low = d.low ?? d.close ?? d.price;
+          return (low < (min.low ?? min.close ?? min.price)) ? d : min;
+        }, searchRange[0]);
+        const lowPrice = minLow.low ?? minLow.close ?? minLow.price;
+        if (lowPrice < w1End.price) {
+          w2End = { type: 'low', price: lowPrice, time: getT(minLow), timestamp: minLow.timestamp };
+          // 找到对应的关键点索引（用于后续浪3识别）
+          const w2KeyPoint = pointsAfterLow.find(p => Math.abs(p.price - lowPrice) < 0.01 && p.time > w1Time);
+          if (w2KeyPoint) {
+            cursor = pointsAfterLow.indexOf(w2KeyPoint);
+          }
+        }
       }
     }
-    for (let i = cursor + 1; i < pointsAfterLow.length; i++) {
-      const p = pointsAfterLow[i];
-      if (p.type === 'low' && p.price > w2End.price && !w4End) {
-        w4End = p;
-        cursor = i;
-        break;
+    // 若仍未找到浪2（既无回撤也无K线低点），取浪1后第一个低点作为浪2
+    // 注意：此 fallback 不保证浪2价格低于浪1终点，代表极强势市场的微幅回调
+    if (!w2End) {
+      for (let i = cursor + 1; i < pointsAfterLow.length; i++) {
+        const p = pointsAfterLow[i];
+        if (p.type === 'low' && !w2End) {
+          w2End = p;
+          cursor = i;
+          break;
+        }
       }
     }
-    for (let i = cursor + 1; i < pointsAfterLow.length; i++) {
-      const p = pointsAfterLow[i];
-      if (p.type === 'high' && p.price > w3End.price && !w5End) {
-        w5End = p;
-        break;
+    // 文档 §1.14.20 浪2回撤率下限检查：回撤不足20%则1浪可能未结束
+    // "如果回撤不足20%，则肯定不是2浪，而是之前假设的1浪还未结束"
+    if (w2End && w1End) {
+      const w1Range = w1End.price - globalLow.price; // 1浪幅度
+      const w2Retrace = w1End.price - w2End.price;    // 2浪回撤幅度
+      const w2RetraceRatio = w1Range > 0 ? (w2Retrace / w1Range) : 0;
+      if (w2RetraceRatio < 0.20 && w2RetraceRatio >= 0) {
+        console.log('[波浪识别] ⚠️ 浪2回撤仅 ' + (w2RetraceRatio * 100).toFixed(1) + '%（< 20%），'
+          + '根据文档 §1.14.20，1浪可能尚未结束。'
+          + '尝试将浪1延伸至更远的高点...');
+        // 尝试延伸浪1：在当前浪2之后寻找更高的高点作为新浪1终点
+        const extendedHighs = pointsAfterLow.filter(p =>
+          p.type === 'high' && p.time > w2End.time && p.price > w1End.price
+        );
+        if (extendedHighs.length > 0) {
+          // 取第一个更高的高点作为新浪1终点（保守策略）
+          const newW1End = extendedHighs[0];
+          console.log('[波浪识别] 💡 浪1延伸: ' + w1End.price.toFixed(2) + ' → ' + newW1End.price.toFixed(2));
+          w1End = newW1End;
+          cursor = pointsAfterLow.indexOf(newW1End);
+          // 重新寻找浪2（新浪1之后的最低低点）
+          w2End = null;
+          for (let i = cursor + 1; i < pointsAfterLow.length; i++) {
+            const p = pointsAfterLow[i];
+            if (p.type === 'low' && p.price < w1End.price && !w2End) {
+              w2End = p;
+              cursor = i;
+              break;
+            }
+          }
+          // K线补充寻找浪2
+          if (!w2End && klineData && klineData.length > 0) {
+            const w1Time = w1End.time || (w1End.timestamp > 1e12 ? w1End.timestamp : w1End.timestamp * 1000);
+            const getT = (d) => d.time || (d.timestamp > 1e12 ? d.timestamp : d.timestamp * 1000);
+            const afterW1 = klineData.filter(d => getT(d) > w1Time);
+            if (afterW1.length > 0) {
+              const searchRange = afterW1.slice(0, 20);
+              const minLow = searchRange.reduce((min, d) => {
+                const low = d.low ?? d.close ?? d.price;
+                return (low < (min.low ?? min.close ?? min.price)) ? d : min;
+              }, searchRange[0]);
+              const lowPrice = minLow.low ?? minLow.close ?? minLow.price;
+              if (lowPrice < w1End.price) {
+                w2End = { type: 'low', price: lowPrice, time: getT(minLow), timestamp: minLow.timestamp };
+                const w2KeyPoint = pointsAfterLow.find(p => Math.abs(p.price - lowPrice) < 0.01 && p.time > w1Time);
+                if (w2KeyPoint) cursor = pointsAfterLow.indexOf(w2KeyPoint);
+              }
+            }
+          }
+          // 重新检查新的回撤率
+          if (w2End) {
+            const newW1Range = w1End.price - globalLow.price;
+            const newW2Retrace = w1End.price - w2End.price;
+            const newRatio = newW1Range > 0 ? (newW2Retrace / newW1Range) : 0;
+            console.log('[波浪识别] 📊 延伸后浪2回撤率: ' + (newRatio * 100).toFixed(1) + '%');
+          }
+          // 浪3需要重新识别（因为浪1/浪2已变化）
+          w3End = null;
+          w4End = null;
+          w5End = null;
+        }
       }
     }
-    // 若未找到完整5浪，用最后一个显著高点作为5
+    // 浪3：浪2终点之后的最高高点，必须 > 浪1终点（突破前高）
+    // 文档 §2.1.1：3浪是主升浪，最具爆发力，涨幅最大
+    // 文档 §2.1.2：3浪通常为1浪的1.618倍
+    // 策略：先找到浪2之后第一个突破浪1终点的高点，然后向后扫描连续上涨段的最高高点
+    //       遇到"有效回调"（低点低于前一高点一定幅度）时停止，确保浪3不会吃掉浪5
+    {
+      let firstBreakIdx = -1;
+      // 第一步：找到浪2之后第一个突破浪1终点的高点位置
+      for (let i = cursor + 1; i < pointsAfterLow.length; i++) {
+        const p = pointsAfterLow[i];
+        if (p.type === 'high' && p.price > w1End.price) {
+          firstBreakIdx = i;
+          break;
+        }
+      }
+      if (firstBreakIdx >= 0) {
+        // 第二步：从该点向后，在遇到有效回调之前，取最高的高点
+        let bestHigh = pointsAfterLow[firstBreakIdx];
+        let bestIdx = firstBreakIdx;
+        for (let i = firstBreakIdx + 1; i < pointsAfterLow.length; i++) {
+          const p = pointsAfterLow[i];
+          if (p.type === 'high' && p.price > bestHigh.price) {
+            bestHigh = p;
+            bestIdx = i;
+          }
+          // 遇到低点且该低点构成对当前最高点的有效回调时停止
+          // "有效回调" = 低于当前最高价的一定比例（回撤超过浪2到当前高点幅度的23.6%）
+          if (p.type === 'low' && bestHigh) {
+            const riseFromW2 = bestHigh.price - w2End.price;
+            const pullback = bestHigh.price - p.price;
+            if (riseFromW2 > 0 && pullback / riseFromW2 >= 0.236) {
+              break; // 有效回调，浪3到此结束
+            }
+          }
+        }
+        w3End = bestHigh;
+        cursor = bestIdx;
+      }
+    }
+    // 若关键点中未找到浪3，从K线数据取浪2之后的最高点（高于浪1终点）
+    if (!w3End && w2End && klineData && klineData.length > 0) {
+      const w2Time = w2End.time || (w2End.timestamp > 1e12 ? w2End.timestamp : w2End.timestamp * 1000);
+      const getT = (d) => d.time || (d.timestamp > 1e12 ? d.timestamp : d.timestamp * 1000);
+      const after2Kline = klineData.filter(d => getT(d) > w2Time);
+      if (after2Kline.length > 0) {
+        const maxCandle = after2Kline.reduce((max, d) => {
+          const h = d.high ?? d.close ?? d.price;
+          const mH = max.high ?? max.close ?? max.price;
+          return h > mH ? d : max;
+        }, after2Kline[0]);
+        const maxPrice = maxCandle.high ?? maxCandle.close ?? maxCandle.price;
+        if (maxPrice > w1End.price) {
+          w3End = { type: 'high', price: maxPrice, time: getT(maxCandle), timestamp: maxCandle.timestamp };
+        }
+      }
+    }
+    // 浪4：浪3终点之后的低点
+    // 文档 §1.4.5.3.1（推动浪铁律）：4浪不能切入1浪价格区间 → price > w1End.price
+    // 文档 §1.4.5.3.2：4浪不能折返3浪的100% → price > w2End.price (即3浪起点)
+    // 标准条件：< 浪3终点 且 > 浪1终点（严格遵循推动浪铁律）
+    if (w3End && w1End) {
+      for (let i = cursor + 1; i < pointsAfterLow.length; i++) {
+        const p = pointsAfterLow[i];
+        if (p.type === 'low' && p.price < w3End.price && p.price > w1End.price && !w4End) {
+          w4End = p;
+          cursor = i;
+          break;
+        }
+      }
+    }
+    // 若未找到严格浪4，次选：< 浪3终点 且 > 浪2终点（不切入1浪起点即浪2终点）
+    // 这仍满足 §1.4.5.3.2（不折返3浪100%），但可能属于引导楔形/终结楔形（4浪可切入1浪）
+    if (!w4End && w3End && w2End) {
+      for (let i = cursor + 1; i < pointsAfterLow.length; i++) {
+        const p = pointsAfterLow[i];
+        if (p.type === 'low' && p.price < w3End.price && p.price > w2End.price && !w4End) {
+          w4End = p;
+          cursor = i;
+          console.log('[波浪识别] ⚠️ 浪4切入浪1价格区间（' + p.price.toFixed(2) + ' < 浪1终点' + w1End.price.toFixed(2) + '），可能为楔形而非推动浪');
+          break;
+        }
+      }
+    }
+    // 浪5：浪4终点之后「最高」的高点（不贪心取第一个，而是取全局最高）
+    // 浪5 是推动浪的终点，应该选择最显著的价格极值
+    if (w4End) {
+      const after4Highs = pointsAfterLow.filter(p => p.time > w4End.time && p.type === 'high' && p.price > w4End.price);
+      if (after4Highs.length > 0) {
+        w5End = after4Highs.reduce((max, p) => p.price > max.price ? p : max, after4Highs[0]);
+      }
+    }
+    // 若关键点中未找到，从K线数据取浪4之后的最高点
+    if (!w5End && w4End && klineData && klineData.length > 0) {
+      const w4Time = w4End.time || (w4End.timestamp > 1e12 ? w4End.timestamp : w4End.timestamp * 1000);
+      const getT = (d) => d.time || (d.timestamp > 1e12 ? d.timestamp : d.timestamp * 1000);
+      const after4Kline = klineData.filter(d => getT(d) > w4Time);
+      if (after4Kline.length > 0) {
+        const maxCandle = after4Kline.reduce((max, d) => {
+          const h = d.high ?? d.close ?? d.price;
+          const mH = max.high ?? max.close ?? max.price;
+          return h > mH ? d : max;
+        }, after4Kline[0]);
+        const maxPrice = maxCandle.high ?? maxCandle.close ?? maxCandle.price;
+        if (maxPrice > w4End.price) {
+          w5End = { type: 'high', price: maxPrice, time: getT(maxCandle), timestamp: maxCandle.timestamp };
+        }
+      }
+    }
+    // 若仍未找到，用最后一个显著高点作为5
     if (!w5End && w4End) {
       const after4 = pointsAfterLow.filter(p => p.time > w4End.time && p.type === 'high');
       w5End = after4.reduce((max, p) => p.price > max.price ? p : max, after4[0] || w3End);
     }
 
     if (w1End) impulse.wave1 = { start: globalLow, end: w1End, startPrice: globalLow.price, endPrice: w1End.price };
-    if (w2End) impulse.wave2 = { start: w1End, end: w2End, startPrice: w1End.price, endPrice: w2End.price };
-    if (w3End) impulse.wave3 = { start: w2End, end: w3End, startPrice: w2End.price, endPrice: w3End.price };
-    if (w4End) impulse.wave4 = { start: w3End, end: w4End, startPrice: w3End.price, endPrice: w4End.price };
-    if (w5End) impulse.wave5 = { start: w4End, end: w5End, startPrice: w4End.price, endPrice: w5End.price };
+    if (w2End && w1End) impulse.wave2 = { start: w1End, end: w2End, startPrice: w1End.price, endPrice: w2End.price };
+    if (w3End && w2End) impulse.wave3 = { start: w2End, end: w3End, startPrice: w2End.price, endPrice: w3End.price };
+    if (w4End && w3End) impulse.wave4 = { start: w3End, end: w4End, startPrice: w3End.price, endPrice: w4End.price };
+    if (w5End && w4End) impulse.wave5 = { start: w4End, end: w5End, startPrice: w4End.price, endPrice: w5End.price };
 
     // 调整浪 a-b-c：5浪高点之后，浪c 取浪b之后「最低」的低点（完整锯齿形至 4702 等）
     if (w5End) {
@@ -649,59 +835,155 @@ function identifyWaves12345AndABC(klineData, lookbackPeriod) {
       if (cEnd) corrective.waveC = { start: bEnd, end: cEnd, startPrice: bEnd.price, endPrice: cEnd.price };
     }
   } else {
-    // 下跌趋势：类似逻辑反向
+    // 下跌趋势：类似逻辑反向（下跌推动浪 0(高)->1(低)->2(高)->3(低)->4(高)->5(低)）
     const pointsAfterHigh = sorted.filter(p => p.time >= globalHigh.time);
     if (pointsAfterHigh.length < 6) return { impulse, corrective, keyPoints };
 
     let w1End = null, w2End = null, w3End = null, w4End = null, w5End = null;
     let cursor = 0;
+    // 浪1：全局高点之后的第一个低点
     for (let i = 0; i < pointsAfterHigh.length; i++) {
       const p = pointsAfterHigh[i];
       if (p.type === 'low' && !w1End) { w1End = p; cursor = i; break; }
     }
+    // 浪2：浪1终点之后的第一个高点（必须 > 浪1终点，即反弹）
     for (let i = cursor + 1; i < pointsAfterHigh.length; i++) {
       const p = pointsAfterHigh[i];
-      if (p.type === 'high' && !w2End) { w2End = p; cursor = i; break; }
+      if (p.type === 'high' && p.price > w1End.price && !w2End) { w2End = p; cursor = i; break; }
     }
-    for (let i = cursor + 1; i < pointsAfterHigh.length; i++) {
-      const p = pointsAfterHigh[i];
-      if (p.type === 'low' && p.price < w1End.price && !w3End) { w3End = p; cursor = i; break; }
-    }
-    // 浪5：取浪3之后「最低」的低点（而非第一个低于浪4之后的低点），确保真实最低点被识别
-    const after3Lows = pointsAfterHigh.filter(p => p.time > w3End.time && p.type === 'low' && p.price < w3End.price);
-    w5End = after3Lows.length > 0 ? after3Lows.reduce((min, p) => p.price < min.price ? p : min, after3Lows[0]) : null;
-    // 浪4：浪3与浪5之间的高点，需满足 price < w2End
-    const between3And5 = pointsAfterHigh.filter(p => p.time > w3End.time && p.time < (w5End ? w5End.time : Infinity) && p.type === 'high' && p.price < w2End.price);
-    w4End = between3And5.length > 0 ? between3And5.reduce((max, p) => p.price > max.price ? p : max, between3And5[0]) : null;
-    // 若 keyPoints 中无浪4（浪3到浪5间无高点），从 K 线数据取期间最高点
-    if (!w4End && w5End && klineData.length > 0) {
-      const t3 = w3End.time || w3End.timestamp * 1000;
-      const t5 = w5End.time || w5End.timestamp * 1000;
-      const kBetween = klineData.filter(d => {
-        const t = d.time || (d.timestamp ? d.timestamp * 1000 : 0);
-        return t > t3 && t < t5;
-      });
-      if (kBetween.length > 0) {
-        const maxCandle = kBetween.reduce((m, d) => {
-          const h = d.high ?? d.close ?? d.price;
-          const mH = m.high ?? m.close ?? m.price;
-          return (h || 0) > (mH || 0) ? d : m;
-        }, kBetween[0]);
-        const h = maxCandle.high ?? maxCandle.close ?? maxCandle.price;
-        if (h != null && h < w2End.price) {
-          w4End = { type: 'high', price: h, time: maxCandle.time || maxCandle.timestamp * 1000 };
+    // 浪2回撤率下限检查（下跌趋势）
+    // 文档 §1.14.20：回撤不足20%则1浪可能未结束
+    if (w2End && w1End) {
+      const w1Range = globalHigh.price - w1End.price; // 1浪跌幅
+      const w2Retrace = w2End.price - w1End.price;     // 2浪反弹幅度
+      const w2RetraceRatio = w1Range > 0 ? (w2Retrace / w1Range) : 0;
+      if (w2RetraceRatio < 0.20 && w2RetraceRatio >= 0) {
+        console.log('[波浪识别] ⚠️ 下跌趋势浪2反弹仅 ' + (w2RetraceRatio * 100).toFixed(1) + '%（< 20%），'
+          + '根据文档 §1.14.20，1浪可能尚未结束。尝试延伸浪1...');
+        const extendedLows = pointsAfterHigh.filter(p =>
+          p.type === 'low' && p.time > w2End.time && p.price < w1End.price
+        );
+        if (extendedLows.length > 0) {
+          const newW1End = extendedLows[0];
+          console.log('[波浪识别] 💡 浪1延伸: ' + w1End.price.toFixed(2) + ' → ' + newW1End.price.toFixed(2));
+          w1End = newW1End;
+          cursor = pointsAfterHigh.indexOf(newW1End);
+          w2End = null;
+          for (let i = cursor + 1; i < pointsAfterHigh.length; i++) {
+            const p = pointsAfterHigh[i];
+            if (p.type === 'high' && p.price > w1End.price && !w2End) { w2End = p; cursor = i; break; }
+          }
+          w3End = null; w4End = null; w5End = null;
         }
       }
     }
-    if (!w4End && w5End) {
-      w4End = w3End;
+    // 浪3（下跌趋势）：浪2终点之后的最低低点，必须 < 浪1终点（突破前低）
+    // 文档 §2.1.1：3浪最具爆发力，跌幅最大
+    // 策略：取浪2之后到有效反弹前的最低低点
+    if (w2End) {
+      let firstBreakIdx = -1;
+      for (let i = cursor + 1; i < pointsAfterHigh.length; i++) {
+        const p = pointsAfterHigh[i];
+        if (p.type === 'low' && p.price < w1End.price) {
+          firstBreakIdx = i;
+          break;
+        }
+      }
+      if (firstBreakIdx >= 0) {
+        let bestLow = pointsAfterHigh[firstBreakIdx];
+        let bestIdx = firstBreakIdx;
+        for (let i = firstBreakIdx + 1; i < pointsAfterHigh.length; i++) {
+          const p = pointsAfterHigh[i];
+          if (p.type === 'low' && p.price < bestLow.price) {
+            bestLow = p;
+            bestIdx = i;
+          }
+          // 有效反弹 = 反弹超过浪2到当前低点跌幅的23.6%
+          if (p.type === 'high' && bestLow) {
+            const dropFromW2 = w2End.price - bestLow.price;
+            const bounce = p.price - bestLow.price;
+            if (dropFromW2 > 0 && bounce / dropFromW2 >= 0.236) {
+              break;
+            }
+          }
+        }
+        w3End = bestLow;
+        cursor = bestIdx;
+      }
+    }
+    // 浪4（下跌趋势）：浪3终点之后的高点
+    // 文档 §1.4.5.3.1：推动浪4浪不能切入1浪价格区间 → price < w1End.price
+    if (w3End && w1End) {
+      for (let i = cursor + 1; i < pointsAfterHigh.length; i++) {
+        const p = pointsAfterHigh[i];
+        if (p.type === 'high' && p.price > w3End.price && p.price < w1End.price && !w4End) {
+          w4End = p;
+          cursor = i;
+          break;
+        }
+      }
+    }
+    // 次选：< 浪2终点（不折返3浪100%），但可能切入1浪
+    if (!w4End && w3End && w2End) {
+      for (let i = cursor + 1; i < pointsAfterHigh.length; i++) {
+        const p = pointsAfterHigh[i];
+        if (p.type === 'high' && p.price > w3End.price && p.price < w2End.price && !w4End) {
+          w4End = p;
+          cursor = i;
+          console.log('[波浪识别] ⚠️ 下跌趋势浪4切入浪1价格区间，可能为楔形');
+          break;
+        }
+      }
+    }
+    // 浪5（下跌趋势）：浪4终点之后「最低」的低点
+    if (w4End) {
+      const after4Lows = pointsAfterHigh.filter(p => p.time > w4End.time && p.type === 'low' && p.price < w4End.price);
+      if (after4Lows.length > 0) {
+        w5End = after4Lows.reduce((min, p) => p.price < min.price ? p : min, after4Lows[0]);
+      }
+    }
+    // 若关键点中未找到，从K线数据取浪4之后最低点
+    if (!w5End && w4End && klineData && klineData.length > 0) {
+      const w4Time = w4End.time || (w4End.timestamp > 1e12 ? w4End.timestamp : w4End.timestamp * 1000);
+      const getT = (d) => d.time || (d.timestamp > 1e12 ? d.timestamp : d.timestamp * 1000);
+      const after4Kline = klineData.filter(d => getT(d) > w4Time);
+      if (after4Kline.length > 0) {
+        const minCandle = after4Kline.reduce((min, d) => {
+          const l = d.low ?? d.close ?? d.price;
+          const mL = min.low ?? min.close ?? min.price;
+          return l < mL ? d : min;
+        }, after4Kline[0]);
+        const minPrice = minCandle.low ?? minCandle.close ?? minCandle.price;
+        if (minPrice < w4End.price) {
+          w5End = { type: 'low', price: minPrice, time: getT(minCandle), timestamp: minCandle.timestamp };
+        }
+      }
+    }
+    if (!w4End && w3End) {
+      // 若浪4完全未找到，从K线数据取浪3之后的最高点（仅限低于浪1终点）
+      if (klineData && klineData.length > 0) {
+        const t3 = w3End.time || w3End.timestamp * 1000;
+        const getT = (d) => d.time || (d.timestamp > 1e12 ? d.timestamp : d.timestamp * 1000);
+        const after3Kline = klineData.filter(d => getT(d) > t3);
+        if (after3Kline.length > 0) {
+          const maxCandle = after3Kline.reduce((m, d) => {
+            const h = d.high ?? d.close ?? d.price;
+            const mH = m.high ?? m.close ?? m.price;
+            return (h || 0) > (mH || 0) ? d : m;
+          }, after3Kline[0]);
+          const h = maxCandle.high ?? maxCandle.close ?? maxCandle.price;
+          if (h != null && h < w1End.price) {
+            w4End = { type: 'high', price: h, time: getT(maxCandle) };
+          }
+        }
+      }
     }
 
     if (w1End) impulse.wave1 = { start: globalHigh, end: w1End, startPrice: globalHigh.price, endPrice: w1End.price };
-    if (w2End) impulse.wave2 = { start: w1End, end: w2End, startPrice: w1End.price, endPrice: w2End.price };
-    if (w3End) impulse.wave3 = { start: w2End, end: w3End, startPrice: w2End.price, endPrice: w3End.price };
-    if (w4End) impulse.wave4 = { start: w3End, end: w4End, startPrice: w3End.price, endPrice: w4End.price };
-    if (w5End) impulse.wave5 = { start: w4End, end: w5End, startPrice: w4End.price, endPrice: w5End.price };
+    if (w2End && w1End) impulse.wave2 = { start: w1End, end: w2End, startPrice: w1End.price, endPrice: w2End.price };
+    if (w3End && w2End) impulse.wave3 = { start: w2End, end: w3End, startPrice: w2End.price, endPrice: w3End.price };
+    if (w4End && w3End) impulse.wave4 = { start: w3End, end: w4End, startPrice: w3End.price, endPrice: w4End.price };
+    if (w5End && w4End) impulse.wave5 = { start: w4End, end: w5End, startPrice: w4End.price, endPrice: w5End.price };
 
     if (w5End) {
       const after5 = sorted.filter(p => p.time > w5End.time);

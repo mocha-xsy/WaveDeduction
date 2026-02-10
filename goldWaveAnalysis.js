@@ -219,21 +219,26 @@ async function runWaveMode() {
   let klineData;
   if (timeframe === 'H1') {
     // 生成图表时默认抓取最新数据，确保图表包含到今天的 K 线
-    if (genChart) {
+    if (genChart && doFetch) {
       const fetchStart = timeRange ? new Date(timeRange.startMs).toISOString().slice(0, 10) : startDate;
       try {
         console.log(`   🔄 抓取最新数据（${fetchStart} ~ 当前）...`);
         execSync(`node fetch_year_data.js ${fetchStart}`, { cwd: __dirname, stdio: 'inherit' });
+        klineData = loadGoldDataFromFile(); // 使用刚抓取的数据
       } catch (e) {
         console.warn('   ⚠️ 抓取失败，使用本地已有数据:', e.message);
+        klineData = loadKlineDataFromFile(TIMEFRAME_CONFIG.H1.FILE_PATH); // 使用 gold_price_1h.json
       }
     } else if (doFetch) {
       const loaded = loadGoldDataFromFile();
       if (loaded.length < 500) {
         await fetchOrLoadGoldData(startDate);
       }
+      klineData = loadGoldDataFromFile();
+    } else {
+      // 不抓取时，直接使用 gold_price_1h.json
+      klineData = loadKlineDataFromFile(TIMEFRAME_CONFIG.H1.FILE_PATH);
     }
-    klineData = loadGoldDataFromFile();
   } else {
     // H4 / D1：从对应周期文件加载
     const filePath = cfg?.FILE_PATH;
@@ -300,41 +305,69 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
 
   const points = [];
   const { impulse, corrective, continuation } = waveResult;
-  const addPointFromKp = (kp, label) => {
-    const t = kp.time || kp.timestamp * 1000;
-    const p = kp.price ?? kp.close;
-    const idx = times.findIndex(tm => tm >= t);
-    const x = padding.left + (idx >= 0 ? (idx / Math.max(times.length - 1, 1)) * chartWidth : 0);
+
+  // ========== 直接从 waveResult 提取主浪坐标作为图表标注点 ==========
+  // 不再依赖 assignWaveLabelsToKeyPoints 间接匹配（因为 lookback 参数不同、浪2/浪5可能从K线直接搜索而非关键点）
+  const addWavePoint = (pt, label, opts = {}) => {
+    if (!pt) return;
+    const t = pt.time || (pt.timestamp != null ? (pt.timestamp > 1e12 ? pt.timestamp : pt.timestamp * 1000) : null);
+    const p = pt.price ?? pt.close;
+    if (t == null || p == null) return;
+    // 在 K 线时间轴上找最近的索引，计算 X 坐标
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    for (let i = 0; i < times.length; i++) {
+      const diff = Math.abs(times[i] - t);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    }
+    // 如果时间超出 K 线范围，用线性外推
+    let x;
+    if (t <= times[0]) {
+      x = padding.left;
+    } else if (t >= times[times.length - 1]) {
+      x = padding.left + chartWidth;
+    } else {
+      x = padding.left + (bestIdx / Math.max(times.length - 1, 1)) * chartWidth;
+    }
     const y = padding.top + chartHeight - ((p - minP) / range) * chartHeight;
-    points.push({ x, y, p, label, time: new Date(t).toLocaleString('zh-CN'), t, isStart: label === '起点' });
+    points.push({ x, y, p, label, time: new Date(t).toLocaleString('zh-CN'), t, isStart: opts.isStart || false, isPredicted: opts.isPredicted || false });
   };
-  // 任何被识别的高点和低点都用算法标记浪点
-  const lp = klineData.length < 300 ? 4 : 6;
-  const fullKeyPoints = identifyKeyPoints(klineData, lp);
-  const w1StartTime = impulse.wave1?.start?.time || impulse.wave1?.start?.timestamp * 1000;
-  const tStart = times[0];
-  let labeledKeyPoints;
-  if (w1StartTime != null && tStart != null && w1StartTime > tStart && klineData.length >= 32) {
-    const beforeKline = klineData.filter(d => {
-      const t = d.time || (d.timestamp > 1e12 ? d.timestamp : d.timestamp * 1000);
-      return t >= tStart && t < w1StartTime;
-    });
-    const beforeKeyPoints = fullKeyPoints.filter(kp => {
-      const t = kp.time || kp.timestamp * 1000;
-      return t >= tStart && t < w1StartTime;
-    }).sort((a, b) => (a.time || a.timestamp * 1000) - (b.time || b.timestamp * 1000));
-    const mainKeyPoints = fullKeyPoints.filter(kp => {
-      const t = kp.time || kp.timestamp * 1000;
-      return t >= w1StartTime;
-    }).sort((a, b) => (a.time || a.timestamp * 1000) - (b.time || b.timestamp * 1000));
-    const beforeWaveResult = beforeKline.length >= 32 ? identifyWaves12345AndABC(beforeKline, lp) : null;
-    const beforeLabels = beforeWaveResult ? assignWaveLabelsToKeyPoints(beforeKeyPoints, beforeWaveResult) : beforeKeyPoints.map(kp => ({ point: kp, label: kp.type === 'high' ? '高' : '低' }));
-    const mainLabels = assignWaveLabelsToKeyPoints(mainKeyPoints, waveResult);
-    labeledKeyPoints = [...beforeLabels, ...mainLabels].sort((a, b) => ((a.point.time || a.point.timestamp * 1000) - (b.point.time || b.point.timestamp * 1000)));
-  } else {
-    labeledKeyPoints = assignWaveLabelsToKeyPoints(fullKeyPoints.sort((a, b) => (a.time || a.timestamp * 1000) - (b.time || b.timestamp * 1000)), waveResult);
+
+  // 推动浪 起点 + 浪1~5
+  if (impulse.wave1?.start) addWavePoint(impulse.wave1.start, '起点', { isStart: true });
+  if (impulse.wave1?.end) addWavePoint(impulse.wave1.end, '浪1');
+  if (impulse.wave2?.end) addWavePoint(impulse.wave2.end, '浪2');
+  if (impulse.wave3?.end) addWavePoint(impulse.wave3.end, '浪3');
+  if (impulse.wave4?.end) addWavePoint(impulse.wave4.end, '浪4');
+  if (impulse.wave5?.end) addWavePoint(impulse.wave5.end, '浪5');
+
+  // 调整浪 a-b-c
+  if (corrective.waveA?.end) addWavePoint(corrective.waveA.end, '浪a');
+  if (corrective.waveB?.end) addWavePoint(corrective.waveB.end, '浪b');
+  if (corrective.waveC?.end) addWavePoint(corrective.waveC.end, '浪c');
+
+  // 延续浪 1'~5'
+  if (continuation) {
+    if (continuation.wave1?.end) addWavePoint(continuation.wave1.end, '浪1\'');
+    if (continuation.wave2?.end) addWavePoint(continuation.wave2.end, '浪2\'');
+    if (continuation.wave3?.end) addWavePoint(continuation.wave3.end, '浪3\'');
+    if (continuation.wave4?.end) addWavePoint(continuation.wave4.end, '浪4\'');
+    if (continuation.wave5?.end) addWavePoint(continuation.wave5.end, '浪5\'');
   }
-  labeledKeyPoints.forEach(({ point, label }) => addPointFromKp(point, label));
+
+  // W-X-Y 联合形（仅当与 a-b-c 不完全重合时才额外标注）
+  if (waveResult.wxy) {
+    const tTol = 60000; // 1分钟容差
+    const isDup = (wxyWave, abcWave) => {
+      if (!wxyWave?.end || !abcWave?.end) return false;
+      const t1 = wxyWave.end.time || (wxyWave.end.timestamp > 1e12 ? wxyWave.end.timestamp : (wxyWave.end.timestamp || 0) * 1000);
+      const t2 = abcWave.end.time || (abcWave.end.timestamp > 1e12 ? abcWave.end.timestamp : (abcWave.end.timestamp || 0) * 1000);
+      return Math.abs(t1 - t2) < tTol;
+    };
+    if (!isDup(waveResult.wxy.waveW, corrective.waveA) && waveResult.wxy.waveW?.end) addWavePoint(waveResult.wxy.waveW.end, '浪W');
+    if (!isDup(waveResult.wxy.waveX, corrective.waveB) && waveResult.wxy.waveX?.end) addWavePoint(waveResult.wxy.waveX.end, '浪X');
+    if (!isDup(waveResult.wxy.waveY, corrective.waveC) && waveResult.wxy.waveY?.end) addWavePoint(waveResult.wxy.waveY.end, '浪Y');
+  }
   // 浪c 之后无实际延续浪时，添加预测性点位（基于黄金分割）
   const hasContinuation = continuation && (continuation.wave1 || continuation.wave2 || continuation.wave3);
   if (corrective.waveC && corrective.waveC.end && !hasContinuation) {

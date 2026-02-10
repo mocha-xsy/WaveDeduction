@@ -187,11 +187,20 @@ async function fetchDataViaPlaywright(ranges, options = {}) {
                     responseStatus = response.status();
                     const text = await response.text();
                     responseBodyPreview = text.slice(0, 600);
+                    // 注意：Investing 的 history 接口常见返回 content-type: text/plain，但正文依然是 JSON。
+                    // 之前仅在 content-type=application/json 时才解析，会把真实数据误判成“无数据”。
+                    // 这里改为：只要 response.ok() 且正文“看起来像 JSON”就尝试解析。
                     if (response.ok()) {
-                        try {
-                            if (text.trim().startsWith('{')) batch = JSON.parse(text);
-                        } catch (parseErr) {
-                            console.warn(`  JSON 解析失败: ${parseErr.message}`);
+                        const trimmed = (text || '').trim();
+                        const looksLikeJson =
+                            (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+                            (trimmed.startsWith('[') && trimmed.endsWith(']'));
+                        if (looksLikeJson) {
+                            try {
+                                batch = JSON.parse(trimmed);
+                            } catch (parseErr) {
+                                console.warn(`  JSON 解析失败: ${parseErr.message}`);
+                            }
                         }
                     }
                     if (!response.ok() || !(batch && batch.t && batch.t.length > 0)) {
