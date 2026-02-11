@@ -413,8 +413,9 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
     ? predPts.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ')
     : '';
 
-  // 回调/顶部点位平行线（仅保留常用：0.382、0.5、0.618）
-  const COMMON_RATIOS = [0.382, 0.5, 0.618];
+  // 回调/顶部点位平行线（回撤位含 0.2，反弹位仅 0.382/0.5/0.618）
+  const RETRACE_RATIOS = [0.2, 0.382, 0.5, 0.618];
+  const BOUNCE_RATIOS = [0.382, 0.5, 0.618];
   const levelLines = [];
   const w1 = impulse.wave1;
   const w5 = impulse.wave5;
@@ -424,8 +425,9 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
     const highP = Math.max(startP, endP);
     const lowP = Math.min(startP, endP);
     const ret = calculateRetracementLevels(highP, lowP);
-    COMMON_RATIOS.forEach((ratio) => {
-      const price = ret[ratio];
+    RETRACE_RATIOS.forEach((ratio) => {
+      // 0.2 不在标准斐波那契比率中，需手动计算
+      const price = ret[ratio] ?? (lowP + (highP - lowP) * ratio);
       if (price != null && price >= minP - range * 0.1 && price <= maxP + range * 0.1) {
         levelLines.push({ price, type: 'retracement', ratio });
       }
@@ -435,7 +437,7 @@ function generateWaveChartHTML(klineData, waveResult, outputPath) {
     const lowP = w5.endPrice ?? w5.end?.price ?? w5.end?.close;
     const highP = w1.startPrice ?? w1.start?.price ?? w1.start?.close;
     const bounce = calculateBounceLevels(lowP, highP);
-    COMMON_RATIOS.forEach((ratio) => {
+    BOUNCE_RATIOS.forEach((ratio) => {
       const price = bounce[ratio];
       if (price != null && price >= minP - range * 0.1 && price <= maxP + range * 0.1) {
         levelLines.push({ price, type: 'bounce', ratio });
